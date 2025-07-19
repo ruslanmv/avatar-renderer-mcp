@@ -1,8 +1,8 @@
 [tool.poetry]
 name = "avatar-renderer-pod"
 version = "0.1.0"
-description = "Synthesia‑class avatar renderer: FOMM + Diff2Lip + Wav2Lip pipeline with MCP STDIO support"
-authors = ["Ruslan Magana Vsevolodovna <ruslan@ruslanmv.com>"]
+description = "Avatar renderer: FOMM + Diff2Lip + Wav2Lip pipeline with MCP STDIO support"
+authors = ["Ruslan Magana Vsevolodovna <contact@ruslanmv.com>"]
 license = "Apache-2.0"
 readme = "README.md"
 packages = [
