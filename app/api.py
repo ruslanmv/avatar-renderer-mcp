@@ -1,28 +1,28 @@
 """
-api.py  –  FastAPI front‑door for the Avatar Renderer Pod
-=========================================================
-* POST /render         → returns {jobId, statusUrl}
-* GET  /status/{id}    → returns either {"state": "..."} or the MP4 file
-* GET  /health/live    → liveness probe  (200 OK)
-* GET  /health/ready   → readiness probe (checks Celery broker if present)
+api.py  –  FastAPI front‑door for the Avatar Renderer Pod
+==========================================================
+* POST /render          → returns {jobId, statusUrl, async}
+* GET  /status/{id}     → returns either {"state": "..."} or the MP4 file
+* GET  /health/live     → liveness probe  (200 OK)
+* GET  /health/ready    → readiness probe (checks Celery broker if present)
 """
+
 from __future__ import annotations
 
 import json
-import os
-import threading
 import uuid
 from pathlib import Path
 from typing import Optional
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Response
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel, Field
 
-from settings import Settings
+from settings import Settings  # pydantic‑based env loader
 
-settings = Settings()  # pydantic‑based env loader
+settings = Settings()
 
-# ───────────────────────────  Celery optional  ──────────────────────────── #
+# ─────────────────── Celery optional ────────────────────────────────────── #
 celery_available = False
 try:
     from celery import Celery
@@ -35,11 +35,12 @@ try:
     )
     celery_available = bool(settings.CELERY_BROKER_URL)
 except ImportError:
-    celery_app = None  # type: ignore[assignment]
+    celery_app = None  # type: ignore
 
-# import here to avoid GPU initialise for health probes
+# import pipeline after Celery to avoid GPU init on health checks
 from pipeline import render_pipeline  # noqa: E402
 
+# ───────────────────────── FastAPI setup ────────────────────────────────── #
 app = FastAPI(
     title="avatar‑renderer‑svc",
     version="0.1.0",
@@ -49,7 +50,15 @@ app = FastAPI(
 WORK_ROOT = Path("/tmp/avatar-jobs")
 WORK_ROOT.mkdir(parents=True, exist_ok=True)
 
-# ────────────────────────────  tasks  ───────────────────────────────────── #
+# ─────────────────────────── Pydantic models ────────────────────────────── #
+class RenderBody(BaseModel):
+    avatarPath: str = Field(..., alias="avatarPath")
+    audioPath: str = Field(..., alias="audioPath")
+    driverVideo: Optional[str] = Field(None, alias="driverVideo")
+    visemeJson: Optional[str] = Field(None, alias="visemeJson")
+
+
+# ───────────────────────── Celery vs Thread task ─────────────────────────── #
 if celery_available:
 
     @celery_app.task(name="render_video_task")
@@ -62,9 +71,7 @@ if celery_available:
             out_path=payload["out_path"],
         )
 
-
 else:
-    # poor‑man's async fallback so /render still works without Celery
     def _render_video_thread(payload: dict):
         render_pipeline(
             face_image=payload["avatar_path"],
@@ -73,26 +80,14 @@ else:
             viseme_json=payload.get("viseme_json"),
             out_path=payload["out_path"],
         )
-        # mark success
+        # mark success for readiness
         (WORK_ROOT / payload["job_id"] / "done").touch()
 
 
-# ──────────────────────────────  REST  ──────────────────────────────────── #
+# ───────────────────────────── REST endpoints ────────────────────────────── #
 @app.post("/render")
-def render_job(body: dict, bg: BackgroundTasks):
-    """
-    Body example:
-      {
-        "avatarPath": "/mnt/models/alice.png",
-        "audioPath":  "/tmp/hello.wav",
-        "driverVideo": null
-      }
-    """
-    avatar_p = body.get("avatarPath")
-    audio_p = body.get("audioPath")
-    if not avatar_p or not audio_p:
-        raise HTTPException(400, "avatarPath and audioPath are required")
-
+def render_job(body: RenderBody, bg: BackgroundTasks):
+    """Start a render job and return jobId + status URL."""
     job_id = str(uuid.uuid4())
     job_dir = WORK_ROOT / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -100,31 +95,34 @@ def render_job(body: dict, bg: BackgroundTasks):
 
     payload = {
         "job_id": job_id,
-        "avatar_path": avatar_p,
-        "audio_path": audio_p,
-        "driver_video": body.get("driverVideo"),
-        "viseme_json": body.get("visemeJson"),
+        "avatar_path": body.avatarPath,
+        "audio_path": body.audioPath,
+        "driver_video": body.driverVideo,
+        "viseme_json": body.visemeJson,
         "out_path": str(out_mp4),
     }
 
-    # record the request
-    (job_dir / "request.json").write_text(json.dumps(body, indent=2))
+    # save original request
+    (job_dir / "request.json").write_text(json.dumps(body.dict(by_alias=True), indent=2))
 
     if celery_available:
-        task: AsyncResult = _render_video_task.delay(payload)  # type: ignore
+        task = _render_video_task.delay(payload)  # type: ignore
         (job_dir / "celery_id").write_text(task.id)
+        async_mode = True
     else:
         bg.add_task(_render_video_thread, payload)
+        async_mode = False
 
     return {
         "jobId": job_id,
         "statusUrl": f"/status/{job_id}",
-        "async": celery_available,
+        "async": async_mode,
     }
 
 
 @app.get("/status/{job_id}")
 def get_status(job_id: str):
+    """Fetch job state or return the completed MP4."""
     job_dir = WORK_ROOT / job_id
     if not job_dir.exists():
         raise HTTPException(404, "job not found")
@@ -142,10 +140,11 @@ def get_status(job_id: str):
         return {"state": task.state}
     else:
         done_marker = job_dir / "done"
-        return {"state": "finished" if done_marker.exists() else "processing"}
+        state = "finished" if done_marker.exists() else "processing"
+        return {"state": state}
 
 
-# ───────────────────── health / readiness  ─────────────────────────────── #
+# ────────────────────── Health & Readiness probes ────────────────────────── #
 @app.get("/health/live")
 def liveness():
     return JSONResponse({"status": "alive"})
