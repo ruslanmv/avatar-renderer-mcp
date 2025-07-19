@@ -8,6 +8,14 @@
 
 ---
 
+This project is an AI Talking Head Generator, a tool that uses artificial intelligence to create a video of a person speaking from two simple inputs:
+
+🖼️ A still image of a person's face.
+
+🎤 An audio file of speech.
+
+The AI analyzes both inputs and then generates a new video, animating the person's mouth, lips, and subtle facial expressions to realistically match the words and timing of the voice recording. The result makes it appear as if the person in the static photo is actually speaking.
+
 ## 🚀 Features
 
 * **FOMM (head pose)** + **Diff2Lip (diffusion visemes)** with automatic fallback to **SadTalker (+ Wav2Lip)** when VRAM is tight.  
