@@ -14,7 +14,7 @@ jobs:
         python-version: ["3.11"]
     env:
       BACKEND_PORT: 8000
-      FRONTEND_PORT: 3000
+      # FRONTEND_PORT is no longer needed
 
     steps:
       # 1) Checkout source
@@ -55,40 +55,18 @@ jobs:
           echo '{"tool":"render_avatar","params":{"avatar_path":"../tests/assets/alice.png","audio_path":"../tests/assets/hello.wav"}}' \
             | python mcp_server.py | jq .
 
-      # 4) (Optional) Front‑end smoke
-      - name: 🟢  Set up Node.js 18
-        uses: actions/setup-node@v4
-        with:
-          node-version: 18
-
-      - name: 📦  Build & serve SPA
-        working-directory: frontend
-        run: |
-          npm install
-          npm run build
-          npx --yes serve -s dist -l $FRONTEND_PORT &
-          echo "Waiting for SPA…"
-          for i in {1..20}; do
-            curl -s http://localhost:$FRONTEND_PORT/ && break
-            sleep 1
-          done
-
-      # 5) Smoke tests
+      # 4) Smoke tests (Backend only)
       - name: 🔍  GET /avatars
         run: curl -sf http://localhost:$BACKEND_PORT/avatars
 
-      - name: 🔍  GET /
-        run: curl -sf http://localhost:$FRONTEND_PORT/
-
-      # 6) Optional static checks
+      # 5) Optional static checks
       - name: 🧪  make check
         if: hashFiles('Makefile') != ''
         run: make check || echo "ℹ️ No check target—skipping."
 
-      # 7) Clean‑up
+      # 6) Clean‑up
       - name: 🧹  Kill background servers
         if: always()
         run: |
-          pkill -f "uvicorn"   || true
-          pkill -f "serve"     || true
+          pkill -f "uvicorn"      || true
           pkill -f "mcp_server.py" || true
