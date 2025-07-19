@@ -1,7 +1,7 @@
-# Avatar Renderer Pod – VideoGenie‑class avatar generator (MCP‑ready)
+# 🤖 Generative MCP Avatar Renderer
 
-> A single‑image → talking‑head engine that reaches high-quality while **natively speaking the MCP protocol**.  
-> Drop the container into your GPU pool and an MCP Gateway auto‑discovers the `render_avatar` tool the moment the process starts.
+> A high-quality generative engine that creates talking avatars from a single image and an audio file.
+> Built for scalable deployments, this renderer natively integrates via the MCP protocol, enabling seamless, auto-discovered tooling in a distributed system.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)]()
 [![License Apache‑2.0](https://img.shields.io/badge/license-Apache%202.0-blue)]()
