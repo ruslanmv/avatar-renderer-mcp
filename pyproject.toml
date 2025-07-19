@@ -1,3 +1,5 @@
+# pyproject.toml
+
 [tool.poetry]
 name = "avatar-renderer-pod"
 version = "0.1.0"

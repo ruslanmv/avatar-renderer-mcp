@@ -1,3 +1,4 @@
+# app/settings.py
 """
 settings.py  –  Centralised runtime configuration for Avatar Renderer Pod
 ========================================================================
@@ -12,7 +13,7 @@ Add new fields here instead of scattering `os.getenv()` across the code‑base.
 
 from pathlib import Path
 from pydantic import Field, field_validator, FieldValidationInfo
-from pydantic import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -58,8 +59,12 @@ class Settings(BaseSettings):
     FOMM_CKPT_DIR: Path = Field(default_factory=lambda: Path("/models/fomm"))
     DIFF2LIP_CKPT_DIR: Path = Field(default_factory=lambda: Path("/models/diff2lip"))
     SADTALKER_CKPT_DIR: Path = Field(default_factory=lambda: Path("/models/sadtalker"))
-    WAV2LIP_CKPT: Path = Field(default_factory=lambda: Path("/models/wav2lip/wav2lip_gan.pth"))
-    GFPGAN_CKPT: Path = Field(default_factory=lambda: Path("/models/gfpgan/GFPGANv1.4.pth"))
+    WAV2LIP_CKPT: Path = Field(
+        default_factory=lambda: Path("/models/wav2lip/wav2lip_gan.pth")
+    )
+    GFPGAN_CKPT: Path = Field(
+        default_factory=lambda: Path("/models/gfpgan/GFPGANv1.4.pth")
+    )
 
     # ------------------------------------------------------------------#
     # FFmpeg                                                            #
@@ -75,12 +80,17 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------#
     # Validation hooks                                                  #
     # ------------------------------------------------------------------#
-    @field_validator("FOMM_CKPT_DIR", "DIFF2LIP_CKPT_DIR", "SADTALKER_CKPT_DIR",
-                     "WAV2LIP_CKPT", "GFPGAN_CKPT", mode='before')
+    @field_validator(
+        "FOMM_CKPT_DIR",
+        "DIFF2LIP_CKPT_DIR",
+        "SADTALKER_CKPT_DIR",
+        "WAV2LIP_CKPT",
+        "GFPGAN_CKPT",
+        mode="before",
+    )
     @classmethod
     def _path_exists(cls, value: Path, info: FieldValidationInfo):
         # Only warn – don’t fail pod start‑up; pipeline will raise if required model missing
-        # We ensure the value is resolved to a Path object before checking existence
         p = Path(value)
         if not p.exists():
             import logging
@@ -91,13 +101,13 @@ class Settings(BaseSettings):
         return value
 
     # ------------------------------------------------------------------#
-    # Pydantic-Settings Configuration                                   #
+    # Pydantic‑Settings Configuration                                   #
     # ------------------------------------------------------------------#
-    model_config = {
-        "env_file": ".env",             # auto‑load if present
-        "env_file_encoding": "utf-8",
-        "case_sensitive": False,        # so `celery_broker_url` and `CELERY_BROKER_URL` both work
-    }
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+    )
 
 
 # singleton instance used across the project
