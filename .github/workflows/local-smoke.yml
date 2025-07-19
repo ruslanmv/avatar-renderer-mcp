@@ -33,7 +33,9 @@ jobs:
           python -m venv .venv
           source .venv/bin/activate
           pip install --upgrade pip
-          pip install fastapi uvicorn pydantic requests
+          # install FastAPI stack + CPU‑only PyTorch
+          pip install fastapi uvicorn pydantic requests \
+                      torch==2.3.0 torchvision==0.14.1
 
       - name: ▶️  Start FastAPI REST server
         working-directory: app
