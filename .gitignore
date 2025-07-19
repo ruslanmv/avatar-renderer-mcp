@@ -55,3 +55,5 @@ __pycache__/
 # Python egg files
 *.egg-info/        
 /backup
+/models
+/external_deps

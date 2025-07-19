@@ -14,29 +14,32 @@ jobs:
         python-version: ["3.11"]
     env:
       BACKEND_PORT: 8000
-      # FRONTEND_PORT is no longer needed
 
     steps:
-      # 1) Checkout source
       - name: ⬇️  Checkout repository
         uses: actions/checkout@v4
 
-      # 2) Backend REST (FastAPI)
-      - name: 🐍  Set up Python ${{ matrix.python-version }}
+      - name: 🐍  Set up Python ${{ matrix.python-version }} and venv
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
+      # Create and activate venv, install dependencies
       - name: 🛠️  Install core REST dependencies
         working-directory: app
         run: |
           python -m venv .venv
           source .venv/bin/activate
           pip install --upgrade pip
-          # install FastAPI stack + CPU‑only PyTorch
           pip install fastapi uvicorn pydantic==2.11.1 requests \
                       torch==2.6.0 pydantic-settings==2.10.1 \
                       numpy
+
+      # Download pretrained model checkpoints
+      - name: 💾  Download model checkpoints
+        run: |
+          source app/.venv/bin/activate
+          bash ./scripts/download_models.sh models
 
       - name: ▶️  Start FastAPI REST server
         working-directory: app
@@ -49,25 +52,20 @@ jobs:
             sleep 1
           done
 
-      # 3) Backend MCP (stdio)
       - name: 🤖  Test MCP stdio server
         working-directory: app
         run: |
           source .venv/bin/activate
-          # Fire a minimal render_avatar request and parse JSON
           echo '{"tool":"render_avatar","params":{"avatar_path":"../tests/assets/alice.png","audio_path":"../tests/assets/hello.wav"}}' \
             | python mcp_server.py | jq .
 
-      # 4) Smoke tests (Backend only)
       - name: 🔍  GET /avatars
         run: curl -sf http://localhost:$BACKEND_PORT/avatars
 
-      # 5) Optional static checks
       - name: 🧪  make check
         if: hashFiles('Makefile') != ''
         run: make check || echo "ℹ️ No check target—skipping."
 
-      # 6) Clean‑up
       - name: 🧹  Kill background servers
         if: always()
         run: |

@@ -1,61 +1,73 @@
 #!/usr/bin/env bash
 #
-# Download all model checkpoints for Avatar‑Renderer‑Pod:
-#   • FOMM (vox‑cpk.pth)
-#   • Diff2Lip (Diff2Lip.pth)
-#   • SadTalker (sadtalker.pth)
-#   • Wav2Lip (wav2lip_gan.pth)
-#   • GFPGAN (GFPGANv1.3.pth)
+# Single‑source checkpoint fetcher for Avatar‑Renderer‑Pod via Hugging Face Hub
+# Usage:  bash scripts/download_models.sh [dest_dir]
 #
-# Usage:
-#   bash scripts/download_models.sh [<dest_dir>]
-#
-
 set -euo pipefail
 
-DEST_DIR=${1:-models}
+# Target directory for models
+DEST_DIR="${1:-models}"
 
-echo "🔽 Creating folders under $DEST_DIR..."
-mkdir -p \
-  "$DEST_DIR/fomm" \
-  "$DEST_DIR/diff2lip" \
-  "$DEST_DIR/sadtalker" \
-  "$DEST_DIR/wav2lip" \
-  "$DEST_DIR/gfpgan"
+echo "🔽  Ensuring model directory '$DEST_DIR' exists and is writable..."
+mkdir -p "$DEST_DIR"
 
-download() {
-  local url=$1 dest=$2
-  if [ -f "$dest" ]; then
-    echo "✔  $dest already exists, skipping"
-  else
-    echo "⬇️  Downloading $(basename $dest)..."
-    wget -q --show-progress "$url" -O "$dest"
+# List of required checkpoint files (relative to DEST_DIR)
+required=(
+  "fomm/vox-cpk.pth"
+  "diff2lip/Diff2Lip.pth"
+  "sadtalker/SadTalker_V0.0.2_256.safetensors"
+  "sadtalker/epoch_20.pth"
+  "sadtalker/sadtalker.pth"
+  "wav2lip/wav2lip_gan.pth"
+  "gfpgan/GFPGANv1.3.pth"
+)
+
+# Check if all files already exist
+all_exist=true
+for path in "${required[@]}"; do
+  if [[ ! -f "$DEST_DIR/$path" ]]; then
+    all_exist=false
+    break
   fi
-}
+done
 
-# 1) FOMM checkpoint
-download \
-  https://github.com/AliaksandrSiarohin/first-order-model/releases/download/v0.1.0/vox-cpk.pth \
-  "$DEST_DIR/fomm/vox-cpk.pth"
+if $all_exist; then
+  echo "✔  All checkpoints already present — nothing to do."
+  exit 0
+fi
 
-# 2) Diff2Lip weights
-download \
-  https://github.com/YuanGary/DiffusionLi/releases/download/v1.0/Diff2Lip.pth \
-  "$DEST_DIR/diff2lip/Diff2Lip.pth"
+# Ensure huggingface_hub library is installed
+python3 - <<'PYCODE'
+import sys, subprocess
+try:
+    import huggingface_hub
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "huggingface_hub"])
+PYCODE
 
-# 3) SadTalker checkpoint
-download \
-  https://github.com/OpenTalker/SadTalker/releases/download/v0.1.0/sadtalker.pth \
-  "$DEST_DIR/sadtalker/sadtalker.pth"
+# Clone repo into a temporary directory
+echo "🔽  Cloning repository to temporary location..."
+tmpdir=$(mktemp -d)
+git clone --depth 1 https://huggingface.co/ruslanmv/avatar-renderer "$tmpdir"
 
-# 4) Wav2Lip GAN model
-download \
-  https://github.com/Rudrabha/Wav2Lip/releases/download/v0.1/wav2lip_gan.pth \
-  "$DEST_DIR/wav2lip/wav2lip_gan.pth"
+# Copy only missing files into DEST_DIR
+echo "📂  Copying required checkpoints into '$DEST_DIR'..."
+for path in "${required[@]}"; do
+  src="$tmpdir/$path"
+  dst="$DEST_DIR/$path"
+  if [[ -f "$src" ]]; then
+    mkdir -p "$(dirname "$dst")"
+    cp -n "$src" "$dst"
+    echo "   • $path"
+  else
+    echo "⚠️  Source missing in repo: $path" >&2
+  fi
+done
 
-# 5) GFPGAN face‑enhancer
-download \
-  https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.3.pth \
-  "$DEST_DIR/gfpgan/GFPGANv1.3.pth"
+# Clean up
+echo "🧹  Cleaning up temporary files..."
+rm -rf "$tmpdir"
 
-echo "✅ All model checkpoints are now available in '$DEST_DIR'."
+# Done
+echo "✅ All model checkpoints are now available in '$DEST_DIR'"
+
