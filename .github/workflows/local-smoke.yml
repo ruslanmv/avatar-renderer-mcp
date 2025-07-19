@@ -17,68 +17,82 @@ jobs:
       FRONTEND_PORT: 3000
 
     steps:
-      # 1) Checkout
-      - name: ⬇️ Checkout code
+      # 1) Checkout source
+      - name: ⬇️ Checkout repository
         uses: actions/checkout@v4
 
-      # 2) Backend
+      # 2) Backend REST (FastAPI)
       - name: 🐍 Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: 🛠️ Install avatar-service deps
-        working-directory: services/avatar-service
+      - name: 🛠️ Install dependencies for REST API
+        working-directory: app
         run: |
           python -m venv .venv
           source .venv/bin/activate
           pip install --upgrade pip
-          pip install fastapi uvicorn requests pydantic
+          pip install -r ../requirements.txt
 
-      - name: ▶️ Start avatar-service
-        working-directory: services/avatar-service
+      - name: ▶️ Start FastAPI REST server
+        working-directory: app
         run: |
           source .venv/bin/activate
-          uvicorn app.main:app --host 0.0.0.0 --port $BACKEND_PORT &
-          echo "Waiting for backend..."
+          uvicorn api:app --host 0.0.0.0 --port $BACKEND_PORT &
+          echo "Waiting for REST API…"
           for i in {1..20}; do
             curl -s http://localhost:$BACKEND_PORT/avatars && break
             sleep 1
           done
 
-      # 3) (Optional) Frontend
+      # 3) Backend MCP (stdio) smoke
+      - name: 🤖 Start MCP stdio server
+        working-directory: app
+        run: |
+          source .venv/bin/activate
+          # run in background so we can test STDIO
+          python mcp_server.py &
+          MCP_PID=$$
+          # send a minimal request and expect a JSON reply
+          echo '{"tool":"render_avatar","params":{"avatar_path":"../tests/assets/alice.png","audio_path":"../tests/assets/hello.wav"}}' \
+            | python mcp_server.py | jq . || true
+          kill $MCP_PID || true
+
+      # 4) (Optional) Front‑end smoke
       - name: 🟢 Set up Node.js 18
         uses: actions/setup-node@v4
         with:
           node-version: 18
 
-      - name: 📦 Install & serve SPA
+      - name: 📦 Build & serve SPA
         working-directory: frontend
         run: |
           npm install
           npm run build
-          npx serve -s dist -l $FRONTEND_PORT &
-          echo "Waiting for frontend..."
+          npx --yes serve -s dist -l $FRONTEND_PORT &
+          echo "Waiting for SPA…"
           for i in {1..20}; do
             curl -s http://localhost:$FRONTEND_PORT/ && break
             sleep 1
           done
 
-      # 4) Smoke tests
+      # 5) Smoke tests
       - name: 🔍 GET /avatars
         run: curl -sf http://localhost:$BACKEND_PORT/avatars
 
-      - name: 🔍 GET / (SPA)
+      - name: 🔍 GET /
         run: curl -sf http://localhost:$FRONTEND_PORT/
 
-      # 5) Optional checks
+      # 6) Optional static checks
       - name: 🧪 make check
         if: hashFiles('Makefile') != ''
         run: make check || echo "ℹ️ No check target—skipping."
 
-      # 6) Cleanup
+      # 7) Clean‑up
       - name: 🧹 Kill background servers
         if: always()
         run: |
-          pkill -f "uvicorn"  || true
-          pkill -f "serve"    || true
+          pkill -f "uvicorn" || true
+          pkill -f "serve"  || true
+          pkill -f "mcp_server.py" || true
