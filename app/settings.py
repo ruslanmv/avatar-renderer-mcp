@@ -12,7 +12,7 @@ Add new fields here instead of scattering `os.getenv()` across the code‑base.
 
 from pathlib import Path
 from pydantic import Field, field_validator, FieldValidationInfo
-from pydantic_settings import BaseSettings
+from pydantic import BaseSettings
 
 
 class Settings(BaseSettings):
