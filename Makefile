@@ -31,11 +31,11 @@ help:            ## Show this help
 	@echo
 	$(call PRINT_TARGET,setup,Create Python venv & install requirements)
 	$(call PRINT_TARGET,download-models,Fetch FOMM / Diff2Lip / GFPGAN weights)
-	$(call PRINT_TARGET,run,Run FastAPI   (REST /render) on :8080)
+	$(call PRINT_TARGET,run,Run FastAPI   (REST /render) on :8080)
 	$(call PRINT_TARGET,run-stdio,Run MCP stdio server (render_avatar))
 	$(call PRINT_TARGET,lint,Run flake8 lint)
 	$(call PRINT_TARGET,fmt,Auto‑format via Black)
-	$(call PRINT_TARGET,test,Run pytest suite (CPU stubs)")
+	$(call PRINT_TARGET,test,Run pytest suite (CPU stubs))
 	$(call PRINT_TARGET,docker-build,Build CUDA image $(IMAGE))
 	$(call PRINT_TARGET,docker-run,Run image with GPU + model mount)
 	$(call PRINT_TARGET,clean,Remove venv, build artefacts)
@@ -43,7 +43,7 @@ help:            ## Show this help
 
 # ----------------------------------------------------------- Python tooling --
 .PHONY: setup
-setup: $(VENV_DIR)/bin/activate ## Create venv + pip install
+setup: $(VENV_DIR)/bin/activate          ## Create venv + pip install
 $(VENV_DIR)/bin/activate:
 	@echo "🔧  Creating venv → $(VENV_DIR)"
 	$(PY) -m venv $(VENV_DIR)
@@ -55,44 +55,44 @@ $(VENV_DIR)/bin/activate:
 # ------------------------------------------------------------ Model assets --
 .PHONY: download-models
 download-models: ## Pull all model checkpoints into ./models
-	@bash scripts/download_models.sh $(MODELS_DIR)
+	@bash scripts/download_models.sh "$(MODELS_DIR)"
 
 # ---------------------------------------------------------- Dev run targets --
 .PHONY: run
-run: setup  ## Start FastAPI REST server on :8080
+run: setup                               ## Start FastAPI REST server on :8080
 	@source $(VENV_DIR)/bin/activate && \
 		uvicorn app.api:app --host 0.0.0.0 --port 8080 --reload
 
 .PHONY: run-stdio
-run-stdio: setup ## Start MCP stdio server
+run-stdio: setup                         ## Start MCP stdio server
 	@source $(VENV_DIR)/bin/activate && \
 		python app/mcp_server.py
 
 # -------------------------------------------------------------- Quality CI --
 .PHONY: lint
-lint: setup  ## flake8 lint
+lint: setup                              ## flake8 lint
 	@$(VENV_DIR)/bin/flake8 app tests
 
 .PHONY: fmt
-fmt: setup   ## Black code format
+fmt: setup                               ## Black code format
 	@$(VENV_DIR)/bin/black app tests
 
 .PHONY: test
-test: setup  ## Run pytest (CPU stub)
+test: setup                              ## Run pytest (CPU stub)
 	@$(VENV_DIR)/bin/pytest -q
 
 # ---------------------------------------------------------------- Docker ---
 .PHONY: docker-build
-docker-build:  ## Build CUDA image ($(IMAGE))
+docker-build:                            ## Build CUDA image (avatar-renderer:dev)
 	docker build -t $(IMAGE) .
 
 .PHONY: docker-run
-docker-run: docker-build ## Run container with GPU & models mount
+docker-run: docker-build                 ## Run container with GPU & models mount
 	docker run --rm --gpus all -p 8080:8080 \
 	  -v $(MODELS_DIR):/models:ro $(IMAGE)
 
 # ---------------------------------------------------------------- Cleanup --
 .PHONY: clean
-clean: ## Delete venv + __pycache__
+clean:                                   ## Delete venv + pycache
 	rm -rf $(VENV_DIR) **/__pycache__ dist build .pytest_cache
 	@echo "🧹  Clean complete."
