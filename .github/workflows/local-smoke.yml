@@ -1,0 +1,84 @@
+name: Local Smoke Test
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+    env:
+      BACKEND_PORT: 8000
+      FRONTEND_PORT: 3000
+
+    steps:
+      # 1) Checkout
+      - name: ⬇️ Checkout code
+        uses: actions/checkout@v4
+
+      # 2) Backend
+      - name: 🐍 Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: 🛠️ Install avatar-service deps
+        working-directory: services/avatar-service
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install --upgrade pip
+          pip install fastapi uvicorn requests pydantic
+
+      - name: ▶️ Start avatar-service
+        working-directory: services/avatar-service
+        run: |
+          source .venv/bin/activate
+          uvicorn app.main:app --host 0.0.0.0 --port $BACKEND_PORT &
+          echo "Waiting for backend..."
+          for i in {1..20}; do
+            curl -s http://localhost:$BACKEND_PORT/avatars && break
+            sleep 1
+          done
+
+      # 3) (Optional) Frontend
+      - name: 🟢 Set up Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: 📦 Install & serve SPA
+        working-directory: frontend
+        run: |
+          npm install
+          npm run build
+          npx serve -s dist -l $FRONTEND_PORT &
+          echo "Waiting for frontend..."
+          for i in {1..20}; do
+            curl -s http://localhost:$FRONTEND_PORT/ && break
+            sleep 1
+          done
+
+      # 4) Smoke tests
+      - name: 🔍 GET /avatars
+        run: curl -sf http://localhost:$BACKEND_PORT/avatars
+
+      - name: 🔍 GET / (SPA)
+        run: curl -sf http://localhost:$FRONTEND_PORT/
+
+      # 5) Optional checks
+      - name: 🧪 make check
+        if: hashFiles('Makefile') != ''
+        run: make check || echo "ℹ️ No check target—skipping."
+
+      # 6) Cleanup
+      - name: 🧹 Kill background servers
+        if: always()
+        run: |
+          pkill -f "uvicorn"  || true
+          pkill -f "serve"    || true
