@@ -87,33 +87,37 @@ avatar-renderer-pod/
 ```mermaid
 sequenceDiagram
     autonumber
-    participant API as FastAPI / MCP STDIO
-    participant Celery as Celery Worker
-    participant FOMM as FOMM (Head + Upper Body)
-    participant Diff2Lip as Diff2Lip (Diffusion Visemes)
-    participant SadTalker as SadTalker (Motion Fallback)
-    participant W2L as Wav2Lip (Lip GAN Fallback)
-    participant FFmpeg as FFmpeg NVENC
 
-    API->>API: POST /render (avatarId, voiceUrl)
-    API->>Celery: enqueue(job)
-    opt reference_video provided
-        Celery->>FOMM: full‑motion driving video
-    else
-        Celery->>FOMM: infer pose from still + audio
+    participant API as FastAPI API
+    participant Celery as Celery Worker
+    participant FOMM as FOMM Motion Model
+    participant Diff2Lip as Diff2Lip Viseme Diffusion
+    participant SadTalker as SadTalker Motion Fallback
+    participant W2L as Wav2Lip Lip GAN Fallback
+    participant FFmpeg as FFmpeg Encoder
+
+    API->>API: POST /render request
+    API->>Celery: Enqueue render job
+    
+    alt Reference video provided
+        Celery->>FOMM: Process full-motion driving video
+    else Still image provided
+        Celery->>FOMM: Infer pose from still image and audio
     end
-    alt GPU RAM >= 12 GB
-        Celery->>Diff2Lip: diffuse mouth frames
-        Diff2Lip-->>Celery: 25 fps RGBA frames
-    else
-        Celery->>SadTalker: generate 3D coefficients
-        SadTalker-->>Celery: coarse frames
-        Celery->>W2L: refine lips (GAN)
-        W2L-->>Celery: final frames
+    
+    alt Sufficient GPU RAM >= 12 GB
+        Celery->>Diff2Lip: Diffuse mouth frames
+        Diff2Lip-->>Celery: Return RGBA frames
+    else Lower GPU RAM
+        Celery->>SadTalker: Generate 3D motion coefficients
+        SadTalker-->>Celery: Return coarse frames
+        Celery->>W2L: Refine lips with GAN
+        W2L-->>Celery: Return final frames
     end
-    Celery->>FFmpeg: encode H.264 (h264_nvenc)
-    FFmpeg-->>Celery: out.mp4
-    Celery-->>API: signed COS URL
+    
+    Celery->>FFmpeg: Encode video to H.264
+    FFmpeg-->>Celery: Return final MP4 video
+    Celery-->>API: Return signed URL for video
 ```
 
 * **FOMM** or **SadTalker** provides realistic head pose, eye‑blink and basic expression.
