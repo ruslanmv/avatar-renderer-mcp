@@ -1,28 +1,29 @@
 """
-settings.py  –  Centralised runtime configuration for Avatar Renderer Pod
+settings.py  –  Centralised runtime configuration for Avatar Renderer Pod
 ========================================================================
 Uses *Pydantic‑v2* `BaseSettings` so every option can be supplied via:
 
-1. Environment variables   e.g.  CELERY_BROKER_URL=redis://…
+1. Environment variables   e.g.  CELERY_BROKER_URL=redis://…
 2. A `.env` file mounted into the container (if `load_dotenv=True`)
-3. Keyword overrides inside unit‑tests  ⇒  `Settings(celery_broker_url="…")`
+3. Keyword overrides inside unit‑tests  ⇒  `Settings(celery_broker_url="…")`
 
 Add new fields here instead of scattering `os.getenv()` across the code‑base.
 """
 
-from pydantic import BaseSettings, Field, validator
 from pathlib import Path
+from pydantic import Field, field_validator, FieldValidationInfo
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
     # ------------------------------------------------------------------#
-    # General                                                            #
+    # General                                                           #
     # ------------------------------------------------------------------#
-    LOG_LEVEL: str = Field("INFO", description="python‑logging level")
+    LOG_LEVEL: str = Field("INFO", description="python-logging level")
     TMP_DIR: Path = Field(Path("/tmp"), description="scratch dir for jobs")
 
     # ------------------------------------------------------------------#
-    # GPU / CUDA                                                         #
+    # GPU / CUDA                                                        #
     # ------------------------------------------------------------------#
     CUDA_VISIBLE_DEVICES: str | None = Field(
         None,
@@ -34,11 +35,11 @@ class Settings(BaseSettings):
     )
 
     # ------------------------------------------------------------------#
-    # Celery (optional)                                                  #
+    # Celery (optional)                                                 #
     # ------------------------------------------------------------------#
     CELERY_BROKER_URL: str | None = Field(
         None,
-        description="e.g. redis://redis:6379/0 ‑ leave empty for ‘local thread’ mode",
+        description="e.g. redis://redis:6379/0 - leave empty for ‘local thread’ mode",
     )
     CELERY_BACKEND_URL: str | None = Field(
         None, description="Result backend – default to broker if empty"
@@ -48,7 +49,7 @@ class Settings(BaseSettings):
     )
 
     # ------------------------------------------------------------------#
-    # Model paths (all must resolve at run‑time)                         #
+    # Model paths (all must resolve at run‑time)                        #
     # ------------------------------------------------------------------#
     MODEL_ROOT: Path = Field(
         Path("/models"), description="Parent directory for all checkpoints"
@@ -61,35 +62,42 @@ class Settings(BaseSettings):
     GFPGAN_CKPT: Path = Field(default_factory=lambda: Path("/models/gfpgan/GFPGANv1.4.pth"))
 
     # ------------------------------------------------------------------#
-    # FFmpeg                                                              #
+    # FFmpeg                                                            #
     # ------------------------------------------------------------------#
     FFMPEG_BIN: str = Field("ffmpeg", description="Path or name of ffmpeg binary")
 
     # ------------------------------------------------------------------#
-    # MCP integration                                                     #
+    # MCP integration                                                   #
     # ------------------------------------------------------------------#
     MCP_ENABLE: bool = Field(True, description="Whether to start MCP server")
     MCP_TOOL_NAME: str = Field("avatar_renderer", description="Name exposed to gateway")
 
     # ------------------------------------------------------------------#
-    # Validation hooks                                                   #
+    # Validation hooks                                                  #
     # ------------------------------------------------------------------#
-    @validator("FOMM_CKPT_DIR", "DIFF2LIP_CKPT_DIR", "SADTALKER_CKPT_DIR",
-               "WAV2LIP_CKPT", "GFPGAN_CKPT")
-    def _path_exists(cls, value: Path, field):
+    @field_validator("FOMM_CKPT_DIR", "DIFF2LIP_CKPT_DIR", "SADTALKER_CKPT_DIR",
+                     "WAV2LIP_CKPT", "GFPGAN_CKPT", mode='before')
+    @classmethod
+    def _path_exists(cls, value: Path, info: FieldValidationInfo):
         # Only warn – don’t fail pod start‑up; pipeline will raise if required model missing
-        if not value.exists():
+        # We ensure the value is resolved to a Path object before checking existence
+        p = Path(value)
+        if not p.exists():
             import logging
 
             logging.getLogger("settings").warning(
-                "⚠️  %s path %s does not exist at boot‑time", field.name, value
+                "⚠️  %s path %s does not exist at boot‑time", info.field_name, value
             )
         return value
 
-    class Config:
-        env_file = ".env"          # auto‑load if present
-        env_file_encoding = "utf‑8"
-        case_sensitive = False     # so `celery_broker_url` and `CELERY_BROKER_URL` both work
+    # ------------------------------------------------------------------#
+    # Pydantic-Settings Configuration                                   #
+    # ------------------------------------------------------------------#
+    model_config = {
+        "env_file": ".env",             # auto‑load if present
+        "env_file_encoding": "utf-8",
+        "case_sensitive": False,        # so `celery_broker_url` and `CELERY_BROKER_URL` both work
+    }
 
 
 # singleton instance used across the project
