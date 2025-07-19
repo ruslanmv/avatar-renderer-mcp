@@ -1,0 +1,108 @@
+# charts/avatar-renderer/values.yaml
+
+# Default values for avatar-renderer Helm chart.
+# This file provides production-ready defaults for deploying
+# the MPC‑ready VideoGenie Avatar Renderer Pod on a GPU‑enabled cluster.
+
+# ------------------------------------------------------------------------------
+# Image
+# ------------------------------------------------------------------------------
+image:
+  repository: icr.io/videogenie/avatar-renderer
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+# ------------------------------------------------------------------------------
+# Replica settings
+# ------------------------------------------------------------------------------
+replicaCount: 0  # start at zero for KEDA scaling
+
+# ------------------------------------------------------------------------------
+# Service settings
+# ------------------------------------------------------------------------------
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+  annotations: {}
+
+# ------------------------------------------------------------------------------
+# Resource requests & limits
+# ------------------------------------------------------------------------------
+resources:
+  requests:
+    cpu: "500m"
+    memory: "1Gi"
+  limits:
+    cpu: "2"
+    memory: "4Gi"
+    nvidia.com/gpu: 1
+
+# ------------------------------------------------------------------------------
+# Autoscaling (HPA fallback; use KEDA scaledobject for Kafka lag)
+# ------------------------------------------------------------------------------
+autoscaling:
+  enabled: true
+  minReplicas: 0
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+
+# ------------------------------------------------------------------------------
+# Node scheduling
+# ------------------------------------------------------------------------------
+nodeSelector:
+  role: gpu: "true"
+
+tolerations:
+  - key: "dedicated"
+    operator: "Equal"
+    value: "gpu"
+    effect: "NoSchedule"
+
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchExpressions:
+            - key: app
+              operator: In
+              values:
+                - avatar-renderer
+        topologyKey: "kubernetes.io/hostname"
+
+# ------------------------------------------------------------------------------
+# MCP STDIO Server
+# ------------------------------------------------------------------------------
+mcpServer:
+  enabled: true
+  command:
+    - "/app/.venv/bin/python"
+  args:
+    - "/app/mcp_server.py"
+  env:
+    - name: MCP_ENABLE
+      value: "true"
+
+# ------------------------------------------------------------------------------
+# Extra pod annotations
+# ------------------------------------------------------------------------------
+podAnnotations: {}
+
+# ------------------------------------------------------------------------------
+# Extra pod labels
+# ------------------------------------------------------------------------------
+podLabels: {}
+
+# ------------------------------------------------------------------------------
+# Helm hooks (if any)
+# ------------------------------------------------------------------------------
+# hooks: {}
+
+# ------------------------------------------------------------------------------
+# Persistence (if you need to cache models locally in the pod)
+# ------------------------------------------------------------------------------
+persistence:
+  enabled: false
+  mountPath: /models
+  accessMode: ReadOnlyMany
+  size: 10Gi

@@ -1,0 +1,40 @@
+{
+  "name": "avatar_renderer",
+  "version": "0.1.0",
+  "description": "Generate a lip‑synced avatar video from a still photo and audio file",
+  "command": "/app/.venv/bin/python",
+  "args": [
+    "/app/mcp_server.py"
+  ],
+  "autoDiscover": true,
+  "tools": [
+    {
+      "name": "render_avatar",
+      "description": "Render an MP4 avatar video given an input face image and audio",
+      "parameters": {
+        "avatar_path": {
+          "type": "string",
+          "description": "Local filesystem path to the avatar image (PNG or JPG)"
+        },
+        "audio_path": {
+          "type": "string",
+          "description": "Local filesystem path to the WAV audio file"
+        },
+        "driver_video": {
+          "type": "string",
+          "description": "(Optional) Local filesystem path to a short reference video for head/body motion"
+        }
+      },
+      "returns": {
+        "jobId": {
+          "type": "string",
+          "description": "Unique identifier for this render job"
+        },
+        "output": {
+          "type": "string",
+          "description": "Local filesystem path to the generated MP4"
+        }
+      }
+    }
+  ]
+}

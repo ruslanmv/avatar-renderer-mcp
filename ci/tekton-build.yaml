@@ -1,0 +1,91 @@
+# ci/tekton-build.yaml
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: avatar-renderer-build
+  namespace: cicd
+spec:
+  params:
+    - name: IMAGE_URL
+      type: string
+      description: OCI image URL, e.g. icr.io/videogenie/avatar-renderer:$(git-commit)
+    - name: GIT_REVISION
+      type: string
+      description: Git commit SHA or branch to build
+  workspaces:
+    - name: shared-workspace
+      description: A shared workspace for source code
+  tasks:
+    - name: fetch-repo
+      taskRef:
+        name: git-clone
+      params:
+        - name: url
+          value: https://github.com/videogenie/avatar-renderer-pod.git
+        - name: revision
+          value: $(params.GIT_REVISION)
+      workspaces:
+        - name: output
+          workspace: shared-workspace
+
+    - name: build-image
+      runAfter:
+        - fetch-repo
+      taskRef:
+        name: buildah
+      params:
+        - name: IMAGE
+          value: $(params.IMAGE_URL)
+        - name: CONTEXT
+          value: $(workspaces.shared-workspace.path)
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    - name: trivy-scan
+      runAfter:
+        - build-image
+      taskRef:
+        name: trivy
+      params:
+        - name: IMAGE
+          value: $(params.IMAGE_URL)
+
+    - name: push-image
+      runAfter:
+        - trivy-scan
+      taskRef:
+        name: buildah
+      params:
+        - name: IMAGE
+          value: $(params.IMAGE_URL)
+        - name: PUSH
+          value: "true"
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+---
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  name: avatar-renderer-build-run
+  namespace: cicd
+spec:
+  pipelineRef:
+    name: avatar-renderer-build
+  params:
+    - name: IMAGE_URL
+      value: icr.io/videogenie/avatar-renderer:$(context.pipelineRun.name)
+    - name: GIT_REVISION
+      value: $(context.pipelineRun.name)
+  workspaces:
+    - name: shared-workspace
+      volumeClaimTemplate:
+        metadata:
+          name: shared-workspace-pvc
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 1Gi

@@ -1,0 +1,23 @@
+# k8s/autoscale.yaml
+# Kubernetes HorizontalPodAutoscaler fallback for avatar-renderer deployment.
+# This is used when KEDA is not available. Scales based on CPU utilization.
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: avatar-renderer-hpa
+  namespace: videogenie
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: avatar-renderer
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 75

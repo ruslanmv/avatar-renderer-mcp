@@ -1,0 +1,19 @@
+# k8s/service.yaml
+# Kubernetes Service for the avatar-renderer pod.
+# Exposes the REST API on port 8080; STDIO tool runs over stdin/stdout.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: avatar-renderer
+  namespace: videogenie
+  labels:
+    app: avatar-renderer
+spec:
+  type: ClusterIP
+  selector:
+    app: avatar-renderer
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

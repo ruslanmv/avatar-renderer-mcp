@@ -1,0 +1,51 @@
+# k8s/deployment.yaml
+# Kubernetes Deployment for the avatar-renderer pod.
+# Requests 1 GPU, mounts a models PVC, runs the MCP STDIO server.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: avatar-renderer
+  namespace: videogenie
+  labels:
+    app: avatar-renderer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: avatar-renderer
+  template:
+    metadata:
+      labels:
+        app: avatar-renderer
+    spec:
+      # Schedule only on GPU‑tainted nodes
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: gpu
+          effect: NoSchedule
+      nodeSelector:
+        role: gpu
+      containers:
+        - name: avatar-renderer
+          image: icr.io/videogenie/avatar-renderer:latest
+          # Use the MCP entrypoint (stdio) by default; HTTP is still available via api.py
+          args: ["/app/mcp_server.py"]
+          resources:
+            requests:
+              cpu: "2"
+              memory: "8Gi"
+            limits:
+              nvidia.com/gpu: 1
+              memory: "16Gi"
+          env:
+            - name: MODEL_DIR
+              value: "/models"
+          volumeMounts:
+            - name: models
+              mountPath: /models
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: avatar-renderer-models-pvc
