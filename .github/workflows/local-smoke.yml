@@ -36,6 +36,7 @@ jobs:
           # install FastAPI stack + CPU‑only PyTorch
           pip install fastapi uvicorn pydantic==2.11.1 requests \
                       torch==2.6.0 pydantic-settings==2.10.1 \
+                      numpy
 
       - name: ▶️  Start FastAPI REST server
         working-directory: app
