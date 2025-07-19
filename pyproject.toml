@@ -22,7 +22,7 @@ dependencies = [
     "torch==2.6.0",
     "torchvision==0.21.0",
     "diffusers==0.20.2",
-    "transformers==4.35.0",
+    "transformers==4.53.2",
     "tokenizers==0.21.2",
     "huggingface-hub==0.33.4",
     "safetensors==0.5.3",

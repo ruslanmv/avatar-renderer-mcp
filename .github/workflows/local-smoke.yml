@@ -12,20 +12,28 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.11"]
+    
+    # Set environment variables for the application at the job level
     env:
       BACKEND_PORT: 8000
+      # Use the GITHUB_WORKSPACE variable to create absolute paths
+      FOMM_CKPT_DIR: ${{ github.workspace }}/models/fomm
+      DIFF2LIP_CKPT_DIR: ${{ github.workspace }}/models/diff2lip
+      SADTALKER_CKPT_DIR: ${{ github.workspace }}/models/sadtalker
+      WAV2LIP_CKPT: ${{ github.workspace }}/models/wav2lip/wav2lip_gan.pth
+      # Point to the correct GFPGAN version your app expects
+      GFPGAN_CKPT: ${{ github.workspace }}/models/gfpgan/GFPGANv1.4.pth
 
     steps:
-      - name: ⬇️  Checkout repository
+      - name: ⬇️ Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🐍  Set up Python ${{ matrix.python-version }} and venv
+      - name: 🐍 Set up Python ${{ matrix.python-version }} and venv
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
-      # Create and activate venv, install dependencies
-      - name: 🛠️  Install core REST dependencies
+      - name: 🛠️ Install core REST dependencies
         working-directory: app
         run: |
           python -m venv .venv
@@ -36,37 +44,39 @@ jobs:
                       numpy
 
       # Download pretrained model checkpoints
-      - name: 💾  Download model checkpoints
+      - name: 💾 Download model checkpoints
         run: |
-          source app/.venv/bin/activate
-          bash ./scripts/download_models.sh models
+          # Use the new script for CI
+          bash ./scripts/download_models_ci.sh models
 
-      - name: ▶️  Start FastAPI REST server
+      - name: ▶️ Start FastAPI REST server
         working-directory: app
         run: |
           source .venv/bin/activate
           uvicorn api:app --host 0.0.0.0 --port $BACKEND_PORT &
           echo "Waiting for REST API…"
-          for i in {1..20}; do
-            curl -s http://localhost:$BACKEND_PORT/avatars && break
+          # Increased loop count for safety, in case server needs more time
+          for i in {1..30}; do
+            # Check for a 200 OK status on a health-check endpoint if available, otherwise use /docs
+            curl -s -o /dev/null -w "%{http_code}" http://localhost:$BACKEND_PORT/docs | grep 200 && break
             sleep 1
           done
 
-      - name: 🤖  Test MCP stdio server
+      - name: 🤖 Test MCP stdio server
         working-directory: app
         run: |
           source .venv/bin/activate
           echo '{"tool":"render_avatar","params":{"avatar_path":"../tests/assets/alice.png","audio_path":"../tests/assets/hello.wav"}}' \
             | python mcp_server.py | jq .
 
-      - name: 🔍  GET /avatars
+      - name: 🔍 GET /avatars
         run: curl -sf http://localhost:$BACKEND_PORT/avatars
 
-      - name: 🧪  make check
+      - name: 🧪 make check
         if: hashFiles('Makefile') != ''
         run: make check || echo "ℹ️ No check target—skipping."
 
-      - name: 🧹  Kill background servers
+      - name: 🧹 Kill background servers
         if: always()
         run: |
           pkill -f "uvicorn"      || true
