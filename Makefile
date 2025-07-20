@@ -3,6 +3,7 @@
 #
 #   make help           # list all targets
 #   make setup          # create .venv + install all dependencies + models
+#   make install        # setup venv & download models
 #   make install-git-deps  # clone & install non-package Git repos
 #   make download-models # fetch all model checkpoints
 #   make run            # run FastAPI (localhost:8080)
@@ -34,6 +35,7 @@ help:           ## Show this help
 	@echo "Avatar‑Renderer‑Pod — developer workflow"
 	@echo
 	$(call PRINT_TARGET,setup,Create venv, install deps & models)
+	$(call PRINT_TARGET,install,Setup venv & download models)
 	$(call PRINT_TARGET,install-git-deps,Clone & install non-package Git repos)
 	$(call PRINT_TARGET,download-models,Fetch FOMM / Diff2Lip / GFPGAN weights)
 	$(call PRINT_TARGET,run,Run FastAPI (REST) on :8080)
@@ -46,10 +48,30 @@ help:           ## Show this help
 	$(call PRINT_TARGET,clean,Remove venv, build artefacts)
 	@echo
 
+# ------------------------------------------------------------- Installer ---
+.PHONY: install
+install: setup download-models   ## Ensure venv is up and model checkpoints are downloaded
+	@echo "✅   Installation complete."
+
 # ----------------------------------------------------------- Python tooling --
 # The main setup target: venv + packages + Git deps + model assets
 .PHONY: setup
-setup: $(VENV_BIN)/activate    ## Create venv + install all dependencies & models
+setup:                          ## Create (or recreate) venv + install all dependencies & models
+	@if [ -f "$(VENV_BIN)/activate" ]; then \
+	  printf "🔄  Virtualenv found at '$(VENV_DIR)'. Recreate? [y/N] "; \
+	  read ans; \
+	  case "$$ans" in \
+	    [Yy]*) \
+	      echo "🗑   Removing existing venv..."; \
+	      rm -rf "$(VENV_DIR)"; \
+	      ;; \
+	    *) \
+	      echo "⏭   Keeping existing venv. No changes made."; \
+	      exit 0; \
+	      ;; \
+	  esac; \
+	fi; \
+	$(MAKE) $(VENV_BIN)/activate
 
 $(VENV_BIN)/activate: pyproject.toml
 	@echo "🔧   Creating venv → $(VENV_DIR)"
@@ -66,7 +88,7 @@ $(VENV_BIN)/activate: pyproject.toml
 
 # ---------------------------------------------------------------- Git deps --
 .PHONY: install-git-deps
-install-git-deps:           ## Clone and install non-package Git repos
+install-git-deps:               ## Clone and install non-package Git repos
 	@echo "📂   Cloning and installing non-package Git dependencies..."
 	@mkdir -p $(EXT_DEPS_DIR)
 	# SadTalker
@@ -90,47 +112,47 @@ install-git-deps:           ## Clone and install non-package Git repos
 
 # ------------------------------------------------------------ Model assets --
 .PHONY: download-models
-download-models:             ## Pull all model checkpoints into ./models
+download-models:                 ## Pull all model checkpoints into ./models
 	@echo "🔽   Downloading model checkpoints into $(MODELS_DIR)"
 	@bash -lc "source $(VENV_BIN)/activate && \
 	             bash scripts/download_models.sh '$(MODELS_DIR)'" || true
 	@echo "✅   Model checkpoints downloaded."
 
 # ---------------------------------------------------------- Dev run targets --
-run: setup                   ## Start FastAPI REST server on :8080
+run: setup                       ## Start FastAPI REST server on :8080
 	@echo "🚀 Starting FastAPI server on http://localhost:8080"
 	@PYTHONPATH=$(CURDIR)/$(EXT_DEPS_DIR):$(PYTHONPATH) \
 		$(VENV_BIN)/uvicorn app.api:app --host 0.0.0.0 --port 8080 --reload
 
-run-stdio: setup             ## Start MCP stdio server
+run-stdio: setup                 ## Start MCP stdio server
 	@echo "🚀 Starting MCP stdio server..."
 	@PYTHONPATH=$(CURDIR)/$(EXT_DEPS_DIR):$(PYTHONPATH) \
 		$(VENV_BIN)/python app/mcp_server.py
 
 # -------------------------------------------------------------- Quality CI --
-lint: setup                  ## flake8 lint
+lint: setup                      ## flake8 lint
 	@$(VENV_BIN)/flake8 app tests
 
-fmt: setup                   ## Black code format
+fmt: setup                       ## Black code format
 	@$(VENV_BIN)/black app tests
 
-test: setup                  ## Run pytest (CPU stub)
+test: setup                      ## Run pytest (CPU stub)
 	@PYTHONPATH=$(CURDIR)/$(EXT_DEPS_DIR):$(PYTHONPATH) \
 		$(VENV_BIN)/pytest -q
 
 # ---------------------------------------------------------------- Docker ---
-docker-build:                ## Build CUDA image (avatar-renderer:dev)
+docker-build:                    ## Build CUDA image (avatar-renderer:dev)
 	docker build -t $(IMAGE) .
 
-docker-run: docker-build     ## Run container with GPU & models mount
+docker-run: docker-build         ## Run container with GPU & models mount
 	docker run --rm --gpus all -p 8080:8080 \
 		-v $(MODELS_DIR):/models:ro $(IMAGE)
 
 # ---------------------------------------------------------------- Cleanup --
 .PHONY: clean
-clean:                       ## Delete venv, pycache, and cloned repos
+clean:                           ## Delete venv, pycache, and cloned repos
 	@echo "🧹   Cleaning up project..."
 	rm -rf $(VENV_DIR) dist build .pytest_cache .ruff_cache $(EXT_DEPS_DIR)
-	# FIX: Use find to remove all __pycache__
+	# Remove all __pycache__ dirs
 	find . -type d -name "__pycache__" -exec rm -rf {} +
 	@echo "🧹   Clean complete."
