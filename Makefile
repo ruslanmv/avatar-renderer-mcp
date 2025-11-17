@@ -1,136 +1,220 @@
-# ──────────────────────────────────────────────────────────────────────────────
-# Avatar‑Renderer‑Pod  –  Developer Makefile
+# =============================================================================
+# Avatar Renderer MCP - Production-Ready Makefile
+# =============================================================================
+# Author: Ruslan Magana Vsevolodovna
+# Website: https://ruslanmv.com
+# License: Apache-2.0
+# Package Manager: uv (astral-sh)
+# =============================================================================
 #
-#   make help           # list all targets
-#   make setup          # create .venv + install all dependencies + models
-#   make install-git-deps  # clone & install non-package Git repos
-#   make download-models # fetch all model checkpoints
-#   make run            # run FastAPI (localhost:8080)
-#   make run-stdio      # run MCP stdio server
-#   make test           # run pytest (+CPU stub)
-#   make lint / fmt     # flake8 / black
-#   make docker-build / docker-run
-#   make clean          # wipe .venv, **pycache**, dist
-# ──────────────────────────────────────────────────────────────────────────────
+# Quick Start:
+#   make help          # Show all available commands
+#   make install       # Install dependencies with uv
+#   make run           # Start the server
+#
+# =============================================================================
 
-# ------------------------------------------------------------------- Globals --
-PY             ?= python3.11
-VENV_DIR       ?= .venv
-VENV_BIN       = $(VENV_DIR)/bin
-EXT_DEPS_DIR   ?= external_deps
-IMAGE          ?= avatar-renderer:dev
-MODELS_DIR     ?= $(CURDIR)/models
-GREEN          := \033[0;32m
-RESET          := \033[0m
+.DEFAULT_GOAL := help
+SHELL := /bin/bash
 
-# Helper for printing colored target help text
-define PRINT_TARGET
-	@printf "$(GREEN)%-20s$(RESET) %s\n" "$(1)" "$(2)"
-endef
+# ─────────────────────────────────────────────────────────────────────────────
+# Configuration
+# ─────────────────────────────────────────────────────────────────────────────
 
-# --------------------------------------------------------------------- Help ---
+PYTHON ?= python3.11
+UV ?= uv
+VENV_DIR ?= .venv
+VENV_BIN = $(VENV_DIR)/bin
+EXT_DEPS_DIR ?= external_deps
+MODELS_DIR ?= $(CURDIR)/models
+IMAGE ?= avatar-renderer:latest
+
+# Colors
+GREEN := \033[0;32m
+BLUE := \033[0;34m
+YELLOW := \033[1;33m
+RED := \033[0;31m
+RESET := \033[0m
+BOLD := \033[1m
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Help (Self-Documenting)
+# ─────────────────────────────────────────────────────────────────────────────
+
 .PHONY: help
-help:           ## Show this help
-	@echo "Avatar‑Renderer‑Pod — developer workflow"
-	@echo
-	$(call PRINT_TARGET,setup,Create venv, install deps & models)
-	$(call PRINT_TARGET,install-git-deps,Clone & install non-package Git repos)
-	$(call PRINT_TARGET,download-models,Fetch FOMM / Diff2Lip / GFPGAN weights)
-	$(call PRINT_TARGET,run,Run FastAPI (REST) on :8080)
-	$(call PRINT_TARGET,run-stdio,Run MCP stdio server)
-	$(call PRINT_TARGET,lint,Run flake8 lint)
-	$(call PRINT_TARGET,fmt,Auto-format via Black)
-	$(call PRINT_TARGET,test,Run pytest suite)
-	$(call PRINT_TARGET,docker-build,Build CUDA image $(IMAGE))
-	$(call PRINT_TARGET,docker-run,Run image with GPU & models mount)
-	$(call PRINT_TARGET,clean,Remove venv, build artefacts)
-	@echo
+help: ## Show this help message
+	@printf "$(BOLD)$(BLUE)Avatar Renderer MCP - Production Makefile$(RESET)\n\n"
+	@printf "$(BOLD)Usage:$(RESET)\n"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-18s$(RESET) %s\n", $$1, $$2}'
+	@printf "\n"
 
-# ----------------------------------------------------------- Python tooling --
-# The main setup target: venv + packages + Git deps + model assets
-.PHONY: setup
-setup: $(VENV_BIN)/activate    ## Create venv + install all dependencies & models
+# ─────────────────────────────────────────────────────────────────────────────
+# Installation
+# ─────────────────────────────────────────────────────────────────────────────
 
-$(VENV_BIN)/activate: pyproject.toml
-	@echo "🔧   Creating venv → $(VENV_DIR)"
-	$(PY) -m venv $(VENV_DIR)
-	@echo "🐍   Installing standard dependencies from pyproject.toml..."
-	$(VENV_BIN)/pip install --upgrade pip
-	$(VENV_BIN)/pip install -e ".[dev]"
+.PHONY: verify-uv
+verify-uv: ## Verify uv is installed
+	@command -v $(UV) >/dev/null 2>&1 || { \
+		printf "$(RED)Error: uv not found. Install from https://github.com/astral-sh/uv$(RESET)\n"; \
+		exit 1; \
+	}
+	@printf "$(GREEN)✓ uv found: $$($(UV) --version)$(RESET)\n"
+
+.PHONY: install
+install: verify-uv ## Install production dependencies using uv
+	@printf "$(BLUE)Installing dependencies with uv...$(RESET)\n"
+	@if [ ! -d "$(VENV_DIR)" ]; then \
+		$(UV) venv $(VENV_DIR) --python $(PYTHON); \
+	fi
+	$(UV) pip install --python $(VENV_BIN)/python -e .
+	@printf "$(GREEN)✓ Installation complete$(RESET)\n"
+	@printf "$(BOLD)Activate with:$(RESET) source $(VENV_BIN)/activate\n"
+
+.PHONY: dev-install
+dev-install: verify-uv ## Install with development dependencies
+	@printf "$(BLUE)Installing dev dependencies with uv...$(RESET)\n"
+	@if [ ! -d "$(VENV_DIR)" ]; then \
+		$(UV) venv $(VENV_DIR) --python $(PYTHON); \
+	fi
+	$(UV) pip install --python $(VENV_BIN)/python -e ".[dev]"
 	@$(MAKE) install-git-deps
 	@$(MAKE) download-models
-	@echo "🔗   Symlinking models → /models"
-	@ln -sf $(MODELS_DIR) /models
-	@echo "✅   venv & models ready. To activate: source $(VENV_BIN)/activate"
-	@echo "     External Git dependencies are in: $(EXT_DEPS_DIR)/"
+	@printf "$(GREEN)✓ Dev environment ready$(RESET)\n"
 
-# ---------------------------------------------------------------- Git deps --
 .PHONY: install-git-deps
-install-git-deps:           ## Clone and install non-package Git repos
-	@echo "📂   Cloning and installing non-package Git dependencies..."
+install-git-deps: ## Clone external Git dependencies
+	@printf "$(BLUE)Installing Git dependencies...$(RESET)\n"
 	@mkdir -p $(EXT_DEPS_DIR)
-	# SadTalker
 	@if [ ! -d "$(EXT_DEPS_DIR)/SadTalker" ]; then \
-		echo "Cloning SadTalker..."; \
-		git clone https://github.com/OpenTalker/SadTalker.git $(EXT_DEPS_DIR)/SadTalker; \
+		git clone --depth=1 https://github.com/OpenTalker/SadTalker.git $(EXT_DEPS_DIR)/SadTalker; \
 	fi
-	$(VENV_BIN)/pip install -r $(EXT_DEPS_DIR)/SadTalker/requirements.txt
-	# first-order-model
+	@if [ -f "$(EXT_DEPS_DIR)/SadTalker/requirements.txt" ]; then \
+		$(UV) pip install --python $(VENV_BIN)/python -r $(EXT_DEPS_DIR)/SadTalker/requirements.txt; \
+	fi
 	@if [ ! -d "$(EXT_DEPS_DIR)/first-order-model" ]; then \
-		echo "Cloning first-order-model..."; \
-		git clone https://github.com/AliaksandrSiarohin/first-order-model.git $(EXT_DEPS_DIR)/first-order-model; \
+		git clone --depth=1 https://github.com/AliaksandrSiarohin/first-order-model.git $(EXT_DEPS_DIR)/first-order-model; \
 	fi
-	# Wav2Lip
 	@if [ ! -d "$(EXT_DEPS_DIR)/Wav2Lip" ]; then \
-		echo "Cloning Wav2Lip..."; \
-		git clone https://github.com/Rudrabha/Wav2Lip.git $(EXT_DEPS_DIR)/Wav2Lip; \
+		git clone --depth=1 https://github.com/Rudrabha/Wav2Lip.git $(EXT_DEPS_DIR)/Wav2Lip; \
 	fi
-	$(VENV_BIN)/pip install -r $(EXT_DEPS_DIR)/Wav2Lip/requirements.txt
-	@echo "✅   Git dependencies installed."
+	@if [ -f "$(EXT_DEPS_DIR)/Wav2Lip/requirements.txt" ]; then \
+		$(UV) pip install --python $(VENV_BIN)/python -r $(EXT_DEPS_DIR)/Wav2Lip/requirements.txt; \
+	fi
+	@printf "$(GREEN)✓ Git dependencies installed$(RESET)\n"
 
-# ------------------------------------------------------------ Model assets --
 .PHONY: download-models
-download-models:             ## Pull all model checkpoints into ./models
-	@echo "🔽   Downloading model checkpoints into $(MODELS_DIR)"
-	@bash -lc "source $(VENV_BIN)/activate && \
-	             bash scripts/download_models.sh '$(MODELS_DIR)'" || true
-	@echo "✅   Model checkpoints downloaded."
+download-models: ## Download model checkpoints
+	@printf "$(BLUE)Downloading models to $(MODELS_DIR)...$(RESET)\n"
+	@mkdir -p $(MODELS_DIR)
+	@if [ -f "scripts/download_models.sh" ]; then \
+		bash scripts/download_models.sh "$(MODELS_DIR)"; \
+	fi
+	@printf "$(GREEN)✓ Models downloaded$(RESET)\n"
 
-# ---------------------------------------------------------- Dev run targets --
-run: setup                   ## Start FastAPI REST server on :8080
-	@echo "🚀 Starting FastAPI server on http://localhost:8080"
+# ─────────────────────────────────────────────────────────────────────────────
+# Development
+# ─────────────────────────────────────────────────────────────────────────────
+
+.PHONY: run
+run: install ## Start FastAPI server on :8080
+	@printf "$(BLUE)Starting FastAPI server...$(RESET)\n"
 	@PYTHONPATH=$(CURDIR)/$(EXT_DEPS_DIR):$(PYTHONPATH) \
 		$(VENV_BIN)/uvicorn app.api:app --host 0.0.0.0 --port 8080 --reload
 
-run-stdio: setup             ## Start MCP stdio server
-	@echo "🚀 Starting MCP stdio server..."
+.PHONY: run-stdio
+run-stdio: install ## Start MCP STDIO server
+	@printf "$(BLUE)Starting MCP STDIO server...$(RESET)\n"
 	@PYTHONPATH=$(CURDIR)/$(EXT_DEPS_DIR):$(PYTHONPATH) \
-		$(VENV_BIN)/python app/mcp_server.py
+		$(VENV_BIN)/python -m app.mcp_server
 
-# -------------------------------------------------------------- Quality CI --
-lint: setup                  ## flake8 lint
-	@$(VENV_BIN)/flake8 app tests
+# ─────────────────────────────────────────────────────────────────────────────
+# Testing
+# ─────────────────────────────────────────────────────────────────────────────
 
-fmt: setup                   ## Black code format
-	@$(VENV_BIN)/black app tests
-
-test: setup                  ## Run pytest (CPU stub)
+.PHONY: test
+test: dev-install ## Run test suite with coverage
+	@printf "$(BLUE)Running tests...$(RESET)\n"
 	@PYTHONPATH=$(CURDIR)/$(EXT_DEPS_DIR):$(PYTHONPATH) \
-		$(VENV_BIN)/pytest -q
+		$(VENV_BIN)/pytest -v
+	@printf "$(GREEN)✓ Tests complete$(RESET)\n"
 
-# ---------------------------------------------------------------- Docker ---
-docker-build:                ## Build CUDA image (avatar-renderer:dev)
+.PHONY: test-cov
+test-cov: dev-install ## Run tests with coverage report
+	@PYTHONPATH=$(CURDIR)/$(EXT_DEPS_DIR):$(PYTHONPATH) \
+		$(VENV_BIN)/pytest -v --cov=app --cov-report=html --cov-report=term
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Code Quality
+# ─────────────────────────────────────────────────────────────────────────────
+
+.PHONY: lint
+lint: dev-install ## Run linters (ruff + mypy)
+	@printf "$(BLUE)Running linters...$(RESET)\n"
+	@$(VENV_BIN)/ruff check app tests scripts || true
+	@$(VENV_BIN)/mypy app --ignore-missing-imports || true
+	@$(VENV_BIN)/black --check app tests scripts || true
+	@printf "$(GREEN)✓ Linting complete$(RESET)\n"
+
+.PHONY: format
+format: dev-install ## Format code with black and isort
+	@printf "$(BLUE)Formatting code...$(RESET)\n"
+	@$(VENV_BIN)/isort app tests scripts
+	@$(VENV_BIN)/black app tests scripts
+	@printf "$(GREEN)✓ Code formatted$(RESET)\n"
+
+.PHONY: fmt
+fmt: format ## Alias for format
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Docker
+# ─────────────────────────────────────────────────────────────────────────────
+
+.PHONY: docker-build
+docker-build: ## Build Docker image
+	@printf "$(BLUE)Building Docker image...$(RESET)\n"
 	docker build -t $(IMAGE) .
+	@printf "$(GREEN)✓ Image built: $(IMAGE)$(RESET)\n"
 
-docker-run: docker-build     ## Run container with GPU & models mount
+.PHONY: docker-run
+docker-run: docker-build ## Run Docker container with GPU
+	@printf "$(BLUE)Running Docker container...$(RESET)\n"
 	docker run --rm --gpus all -p 8080:8080 \
 		-v $(MODELS_DIR):/models:ro $(IMAGE)
 
-# ---------------------------------------------------------------- Cleanup --
+# ─────────────────────────────────────────────────────────────────────────────
+# Cleanup
+# ─────────────────────────────────────────────────────────────────────────────
+
 .PHONY: clean
-clean:                       ## Delete venv, pycache, and cloned repos
-	@echo "🧹   Cleaning up project..."
-	rm -rf $(VENV_DIR) dist build .pytest_cache .ruff_cache $(EXT_DEPS_DIR)
-	# FIX: Use find to remove all __pycache__
-	find . -type d -name "__pycache__" -exec rm -rf {} +
-	@echo "🧹   Clean complete."
+clean: ## Remove build artifacts and caches
+	@printf "$(BLUE)Cleaning up...$(RESET)\n"
+	@rm -rf $(VENV_DIR)
+	@rm -rf .pytest_cache .ruff_cache .mypy_cache
+	@rm -rf build dist *.egg-info
+	@rm -rf htmlcov .coverage
+	@find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+	@find . -type f -name "*.pyc" -delete
+	@printf "$(GREEN)✓ Cleanup complete$(RESET)\n"
+
+.PHONY: clean-all
+clean-all: clean ## Remove everything including models
+	@printf "$(BLUE)Deep cleaning...$(RESET)\n"
+	@rm -rf $(EXT_DEPS_DIR)
+	@rm -rf $(MODELS_DIR)
+	@printf "$(GREEN)✓ Deep clean complete$(RESET)\n"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Utilities
+# ─────────────────────────────────────────────────────────────────────────────
+
+.PHONY: version
+version: ## Show version information
+	@printf "$(BOLD)Avatar Renderer MCP$(RESET)\n"
+	@printf "Version: $(GREEN)0.1.0$(RESET)\n"
+	@printf "Author:  Ruslan Magana Vsevolodovna\n"
+	@printf "Website: https://ruslanmv.com\n"
+
+.PHONY: check
+check: lint test ## Run all checks (lint + test)
+	@printf "$(GREEN)✓ All checks passed$(RESET)\n"

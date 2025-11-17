@@ -1,59 +1,237 @@
-# Node dependencies
-/node_modules/
+# =============================================================================
+# Avatar Renderer MCP - Git Ignore Rules
+# =============================================================================
+# Author: Ruslan Magana Vsevolodovna
+# Website: https://ruslanmv.com
+# =============================================================================
 
-# Build outputs
-/dist/
-/build/
-/.vite/
+# ─────────────────────────────────────────────────────────────────────────────
+# Python
+# ─────────────────────────────────────────────────────────────────────────────
 
-# Environment files
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+/coverage/
+/.nyc_output/
+
+# Environments
 .env
+.env.*
 .env.*.local
 !.env.example
+.venv/
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
 
-# Logs
-npm-debug.log*
-yarn-debug.log*
-pnpm-debug.log*
-lerna-debug.log*
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb_checkpoints/
 
-# TypeScript cache
-*.tsbuildinfo
+# IPython
+profile_default/
+ipython_config.py
 
-# Editor directories and files
+# pyenv
+.python-version
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Ruff
+.ruff_cache/
+
+# ─────────────────────────────────────────────────────────────────────────────
+# IDEs and Editors
+# ─────────────────────────────────────────────────────────────────────────────
+
+# VSCode
 .vscode/
+*.code-workspace
+
+# PyCharm / IntelliJ
 .idea/
+*.iml
+*.iws
+*.ipr
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# Visual Studio
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Operating Systems
+# ─────────────────────────────────────────────────────────────────────────────
+
 # macOS
 .DS_Store
+.AppleDouble
+.LSOverride
+._*
 
-# Coverage reports
-/coverage/
-/.nyc_output/
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
 
-# ESLint cache
+# Linux
+.directory
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Project-Specific
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Model checkpoints (large files, downloaded separately)
+/models/
+!/models/.gitkeep
+
+# External Git dependencies
+/external_deps/
+!/external_deps/.gitkeep
+
+# Temporary directories
+/tmp/
+/temp/
+*.tmp
+
+# Job outputs
+/output/
+/results/
+/jobs/
+
+# Backups
+/backup/
+*.backup
+*.bak
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Logs
+# ─────────────────────────────────────────────────────────────────────────────
+
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Node.js (if any frontend tooling)
+# ─────────────────────────────────────────────────────────────────────────────
+
+/node_modules/
+.npm/
+.node_repl_history
+*.tsbuildinfo
+.vite/
 .eslintcache
 
-# Optional npm cache directory
-.npm/
+# ─────────────────────────────────────────────────────────────────────────────
+# Cloud & Infrastructure
+# ─────────────────────────────────────────────────────────────────────────────
 
-# Optional REPL history
-.node_repl_history
-# Temporary files
-/temp
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+.terraform.lock.hcl
 
-# Python virtual environment
-.venv/  
-# Jupyter Notebook checkpoints
-.ipynb_checkpoints/         
-# Python cache files
-__pycache__/        
-# Python egg files
-*.egg-info/        
-/backup
-/models
-/external_deps
+# Secrets
+*secret*.yaml
+*secret*.yml
+credentials.json
+token.json
+*.pem
+*.key
+*.crt
+*.p12
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Media Files (Generated Outputs)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Generated videos
+*.mp4
+*.avi
+*.mov
+*.mkv

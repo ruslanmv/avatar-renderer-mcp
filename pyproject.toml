@@ -1,112 +1,355 @@
-# [project] section for PEP 621
+# =============================================================================
+# Avatar Renderer MCP - Production-Ready Configuration
+# =============================================================================
+# Author: Ruslan Magana Vsevolodovna
+# Website: https://ruslanmv.com
+# License: Apache-2.0
+# Package Manager: uv (astral-sh)
+# =============================================================================
+
 [project]
 name = "avatar-renderer-mcp"
 version = "0.1.0"
-description = "Avatar renderer: FOMM + Diff2Lip + Wav2Lip pipeline with MCP STDIO support"
+description = "Production-ready avatar renderer with FOMM, Diff2Lip, and Wav2Lip pipeline featuring MCP STDIO integration for AI-agent communication"
 readme = "README.md"
 license = { text = "Apache-2.0" }
 authors = [
     { name = "Ruslan Magana Vsevolodovna", email = "contact@ruslanmv.com" },
 ]
-requires-python = ">=3.11"
+maintainers = [
+    { name = "Ruslan Magana Vsevolodovna", email = "contact@ruslanmv.com" },
+]
+requires-python = ">=3.11,<3.13"
+keywords = [
+    "avatar",
+    "talking-head",
+    "video-generation",
+    "ai",
+    "mcp",
+    "diffusion",
+    "lip-sync",
+    "fomm",
+    "wav2lip",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
+
 dependencies = [
     # Web framework & server
-    "fastapi==0.116.1",
-    "uvicorn[standard]==0.23.2",
+    "fastapi>=0.116.1,<0.117.0",
+    "uvicorn[standard]>=0.23.2,<0.24.0",
 
     # Task queue
-    "celery==5.5.3",
-    "redis==6.2.0",
+    "celery>=5.5.3,<6.0.0",
+    "redis>=6.2.0,<7.0.0",
 
     # Core ML libraries
-    "torch==2.6.0",
-    "torchvision==0.21.0",
-    "diffusers==0.20.2",
-    "transformers==4.53.2",
-    "tokenizers==0.21.2",
-    "huggingface-hub==0.33.4",
-    "safetensors==0.5.3",
+    "torch>=2.6.0,<2.7.0",
+    "torchvision>=0.21.0,<0.22.0",
+    "diffusers>=0.20.2,<0.21.0",
+    "transformers>=4.53.2,<5.0.0",
+    "tokenizers>=0.21.2,<0.22.0",
+    "huggingface-hub>=0.33.4,<0.34.0",
+    "safetensors>=0.5.3,<0.6.0",
 
     # Face enhancement
-    "gfpgan==1.3.8",
+    "gfpgan>=1.3.8,<2.0.0",
+
+    # Audio processing
+    "librosa>=0.10.0,<0.11.0",
+    "soundfile>=0.12.0,<0.13.0",
 
     # Networking & cloud
-    "requests==2.31.0",
-    "boto3==1.26.160",
-    "kafka-python==2.0.2",
+    "requests>=2.31.0,<3.0.0",
+    "boto3>=1.26.160,<2.0.0",
+    "kafka-python>=2.0.2,<3.0.0",
 
-    # Utilities
-    "python-dotenv==1.0.0",
-    "pydantic>=2.11.1,<3.0",
-    "pydantic-settings>=2.10.1,<3.0",
+    # Utilities & configuration
+    "python-dotenv>=1.0.0,<2.0.0",
+    "pydantic>=2.11.1,<3.0.0",
+    "pydantic-settings>=2.10.1,<3.0.0",
+
+    # CLI & monitoring
+    "click>=8.1.0,<9.0.0",
+    "rich>=13.0.0,<14.0.0",
+
+    # Forced alignment (optional)
+    "textgrid>=1.6.0,<2.0.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest==7.4.0",
-    "black==24.1.0",
-    "flake8==6.1.0",
-    "pre-commit==3.4.0",
+    # Testing
+    "pytest>=8.0.0,<9.0.0",
+    "pytest-cov>=4.1.0,<5.0.0",
+    "pytest-asyncio>=0.23.0,<0.24.0",
+    "pytest-mock>=3.12.0,<4.0.0",
+    "httpx>=0.27.0,<0.28.0",
+
+    # Code quality
+    "black>=24.1.0,<25.0.0",
+    "ruff>=0.8.0,<0.9.0",
+    "mypy>=1.8.0,<2.0.0",
+    "isort>=5.13.0,<6.0.0",
+
+    # Pre-commit hooks
+    "pre-commit>=3.6.0,<4.0.0",
+
+    # Documentation
+    "mkdocs>=1.5.0,<2.0.0",
+    "mkdocs-material>=9.5.0,<10.0.0",
+    "mkdocstrings[python]>=0.24.0,<0.25.0",
+]
+
+all = [
+    "avatar-renderer-mcp[dev]",
 ]
 
 [project.urls]
 Homepage = "https://github.com/ruslanmv/avatar-renderer-mcp"
+Documentation = "https://github.com/ruslanmv/avatar-renderer-mcp/blob/main/README.md"
+Repository = "https://github.com/ruslanmv/avatar-renderer-mcp"
+Issues = "https://github.com/ruslanmv/avatar-renderer-mcp/issues"
+Website = "https://ruslanmv.com"
 
+[project.scripts]
+avatar-renderer = "app.api:main"
+avatar-mcp-server = "app.mcp_server:main"
 
-# [tool.poetry] section for Poetry-specific configuration
-[tool.poetry]
-name = "avatar-renderer-mcp"
-version = "0.1.0"
-description = "Avatar renderer: FOMM + Diff2Lip + Wav2Lip pipeline with MCP STDIO support"
-authors = ["Ruslan Magana Vsevolodovna <contact@ruslanmv.com>"]
-license = "Apache-2.0"
-readme = "README.md"
-packages = [{ include = "app" }]
-
-[[tool.poetry.source]]
-name = "pytorch"
-url = "https://download.pytorch.org/whl/cu124"
-priority = "explicit"
-
-[tool.poetry.dependencies]
-python = "^3.11"
-
-# Web framework & server
-fastapi = "0.116.1"
-uvicorn = { version = "0.23.2", extras = ["standard"] }
-
-# Task queue
-celery = "5.5.3"
-redis = "4.7.0"
-
-# Core ML libraries
-torch = { version = "2.6.0+cu124", source = "pytorch" }
-torchvision = { version = "0.21.0+cu124", source = "pytorch" }
-diffusers = "0.20.2"
-transformers = "4.35.0"
-tokenizers = "0.14.1"
-huggingface-hub = "0.17.3"
-safetensors = "0.3.1"
-
-# Face enhancement
-gfpgan = "2.3.0"
-
-# Networking & cloud
-requests = "2.31.0"
-boto3 = "1.26.160"
-kafka-python = "2.0.2"
-
-# Utilities
-python-dotenv = "1.0.0"
-pydantic = "^2.11.1"
-pydantic-settings = "^2.10.1"
-
-[tool.poetry.group.dev.dependencies]
-pytest = "7.4.0"
-black = "24.1.0"
-flake8 = "6.1.0"
-pre-commit = "3.4.0"
-
+# =============================================================================
+# Build System Configuration (uv compatible)
+# =============================================================================
 [build-system]
-requires = ["poetry-core>=1.5.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling>=1.21.0"]
+build-backend = "hatchling.build"
+
+# =============================================================================
+# Tool Configurations
+# =============================================================================
+
+[tool.hatchling.build.targets.wheel]
+packages = ["app"]
+
+# Black - Code Formatting
+[tool.black]
+line-length = 100
+target-version = ['py311', 'py312']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+  | external_deps
+  | models
+)/
+'''
+
+# Ruff - Fast Python Linter
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".hg",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "venv",
+    "external_deps",
+    "models",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "C",   # flake8-comprehensions
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "N",   # pep8-naming
+    "YTT", # flake8-2020
+    "S",   # flake8-bandit
+    "ANN", # flake8-annotations
+    "ASYNC", # flake8-async
+    "FBT", # flake8-boolean-trap
+    "A",   # flake8-builtins
+    "COM", # flake8-commas
+    "C4",  # flake8-comprehensions
+    "DTZ", # flake8-datetimez
+    "T10", # flake8-debugger
+    "EXE", # flake8-executable
+    "ISC", # flake8-implicit-str-concat
+    "ICN", # flake8-import-conventions
+    "G",   # flake8-logging-format
+    "PIE", # flake8-pie
+    "T20", # flake8-print
+    "PT",  # flake8-pytest-style
+    "Q",   # flake8-quotes
+    "RSE", # flake8-raise
+    "RET", # flake8-return
+    "SLF", # flake8-self
+    "SIM", # flake8-simplify
+    "TID", # flake8-tidy-imports
+    "ARG", # flake8-unused-arguments
+    "PTH", # flake8-use-pathlib
+    "ERA", # eradicate
+    "PL",  # Pylint
+    "TRY", # tryceratops
+    "RUF", # Ruff-specific rules
+]
+ignore = [
+    "ANN101",  # Missing type annotation for self in method
+    "ANN102",  # Missing type annotation for cls in classmethod
+    "ANN401",  # Dynamically typed expressions (Any) are disallowed
+    "S101",    # Use of assert detected
+    "PLR0913", # Too many arguments to function call
+    "COM812",  # Trailing comma missing
+    "ISC001",  # Implicitly concatenated string literals on one line
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "ARG", "FBT"]
+"scripts/*" = ["T201"]
+
+# isort - Import Sorting
+[tool.isort]
+profile = "black"
+line_length = 100
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+ensure_newline_before_comments = true
+skip_glob = ["external_deps/*", "models/*"]
+
+# MyPy - Static Type Checking
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = false
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+follow_imports = "normal"
+strict_optional = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = [
+    "celery.*",
+    "kafka.*",
+    "librosa.*",
+    "soundfile.*",
+    "gfpgan.*",
+    "diffusers.*",
+    "transformers.*",
+    "torch.*",
+    "torchvision.*",
+    "textgrid.*",
+    "first_order_model.*",
+    "diff2lip.*",
+    "sadtalker.*",
+    "wav2lip.*",
+]
+ignore_missing_imports = true
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+# Pytest Configuration
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--showlocals",
+    "--tb=short",
+    "--cov=app",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+    "--cov-report=xml",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+    "gpu: marks tests that require GPU",
+]
+filterwarnings = [
+    "error",
+    "ignore::UserWarning",
+    "ignore::DeprecationWarning",
+]
+
+# Coverage Configuration
+[tool.coverage.run]
+source = ["app"]
+omit = [
+    "*/tests/*",
+    "*/test_*.py",
+    "*/__pycache__/*",
+    "*/external_deps/*",
+]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "if typing.TYPE_CHECKING:",
+    "@abstractmethod",
+]
