@@ -10,7 +10,7 @@
   "tools": [
     {
       "name": "render_avatar",
-      "description": "Render an MP4 avatar video given an input face image and audio",
+      "description": "Generate a photorealistic talking head video from a still image and audio. Supports two quality modes: 'real_time' for fast streaming (news, chatbots) and 'high_quality' for best results (YouTube, marketing).",
       "parameters": {
         "avatar_path": {
           "type": "string",
@@ -18,11 +18,21 @@
         },
         "audio_path": {
           "type": "string",
-          "description": "Local filesystem path to the WAV audio file"
+          "description": "Local filesystem path to the audio file (WAV, MP3, or OGG)"
         },
         "driver_video": {
           "type": "string",
           "description": "(Optional) Local filesystem path to a short reference video for head/body motion"
+        },
+        "viseme_json": {
+          "type": "string",
+          "description": "(Optional) Local filesystem path to phoneme/viseme alignment JSON for precise lip-sync"
+        },
+        "quality_mode": {
+          "type": "string",
+          "enum": ["real_time", "high_quality", "auto"],
+          "default": "auto",
+          "description": "Rendering mode: 'real_time' (fast, SadTalker+Wav2Lip for streaming), 'high_quality' (best, FOMM+Diff2Lip+GFPGAN for content), 'auto' (automatic selection)"
         }
       },
       "returns": {
@@ -33,6 +43,10 @@
         "output": {
           "type": "string",
           "description": "Local filesystem path to the generated MP4"
+        },
+        "qualityMode": {
+          "type": "string",
+          "description": "The quality mode that was used for rendering"
         }
       }
     }

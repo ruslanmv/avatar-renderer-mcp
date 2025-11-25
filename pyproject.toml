@@ -123,15 +123,11 @@ Repository = "https://github.com/ruslanmv/avatar-renderer-mcp"
 Issues = "https://github.com/ruslanmv/avatar-renderer-mcp/issues"
 Website = "https://ruslanmv.com"
 
-[project.scripts]
-avatar-renderer = "app.api:main"
-avatar-mcp-server = "app.mcp_server:main"
-
 # =============================================================================
 # Build System Configuration (uv compatible)
 # =============================================================================
 [build-system]
-requires = ["hatchling>=1.21.0"]
+requires = ["hatchling>=1.25.0"]
 build-backend = "hatchling.build"
 
 # =============================================================================
@@ -140,6 +136,17 @@ build-backend = "hatchling.build"
 
 [tool.hatchling.build.targets.wheel]
 packages = ["app"]
+include = [
+    "app/**/*.py",
+    "mcp-tool.json",
+    "docs/**/*.md",
+    "docs/**/*.svg",
+]
+exclude = [
+    "app/**/__pycache__",
+    "app/**/*.pyc",
+    "tests",
+]
 
 # Black - Code Formatting
 [tool.black]
