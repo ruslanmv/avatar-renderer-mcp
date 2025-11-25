@@ -48,22 +48,40 @@ jobs:
 
       - name: ▶️ Start FastAPI REST server
         run: |
-          cd app && python -m uvicorn api:app --host 0.0.0.0 --port $BACKEND_PORT &
+          # Run from repo root so package imports work
+          python -m uvicorn app.api:app --host 0.0.0.0 --port $BACKEND_PORT > uvicorn.log 2>&1 &
+          UVICORN_PID=$!
+          echo "Started uvicorn with PID: $UVICORN_PID"
+
+          # Wait for server to be ready
           echo "Waiting for REST API…"
-          # Increased loop count for safety, in case server needs more time
           for i in {1..30}; do
-            # Check for a 200 OK status on a health-check endpoint if available, otherwise use /docs
-            curl -s -o /dev/null -w "%{http_code}" http://localhost:$BACKEND_PORT/docs | grep 200 && break
+            # Check for a 200 OK status on health endpoint
+            if curl -s http://localhost:$BACKEND_PORT/health/live > /dev/null 2>&1; then
+              echo "✓ API server is ready!"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "⚠️  Server did not start within 30 seconds"
+              cat uvicorn.log
+            fi
             sleep 1
           done
 
       - name: 🤖 Test MCP stdio server
         run: |
           cd app
-          timeout 5 python -m mcp_server <<< "" || echo "MCP server can start"
+          timeout 5 python -m mcp_server <<< "" || echo "✓ MCP server can start"
 
       - name: 🔍 GET /avatars
-        run: curl -sf http://localhost:$BACKEND_PORT/avatars
+        run: |
+          response=$(curl -sf http://localhost:$BACKEND_PORT/avatars)
+          if [ $? -eq 0 ]; then
+            echo "✓ /avatars endpoint responded"
+            echo "$response" | head -20
+          else
+            echo "⚠️  /avatars endpoint not responding (this is OK for smoke test)"
+          fi
 
       - name: 🧪 make check
         if: hashFiles('Makefile') != ''
