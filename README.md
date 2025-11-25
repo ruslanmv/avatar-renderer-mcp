@@ -1,3 +1,7 @@
+<div align="center">
+
+<img src="docs/logo.svg" alt="Avatar Renderer MCP Logo" width="200"/>
+
 # Avatar Renderer MCP
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
@@ -6,7 +10,13 @@
 [![Ruff](https://img.shields.io/badge/linter-ruff-purple.svg)](https://github.com/astral-sh/ruff)
 [![Package Manager: uv](https://img.shields.io/badge/package%20manager-uv-green.svg)](https://github.com/astral-sh/uv)
 
-> **Production-ready AI-powered talking head generation system with enterprise-grade MCP integration**
+**Production-ready AI-powered talking head generation system with enterprise-grade MCP integration**
+
+[Features](#features) • [Installation](#installation) • [Usage](#usage) • [Quality Modes](#quality-modes) • [Deployment](#deployment) • [Documentation](#documentation)
+
+</div>
+
+---
 
 A high-performance, scalable avatar rendering engine that transforms static images and audio into realistic talking head videos using state-of-the-art deep learning models.
 
@@ -35,20 +45,24 @@ The AI analyzes both inputs and generates a video where the person appears to be
 
 ### Core Capabilities
 
-- ✅ **Multi-Model Pipeline**: FOMM for head pose + Diff2Lip for photorealistic lip-sync
-- ✅ **Automatic Fallback**: Switches to SadTalker + Wav2Lip when GPU memory is constrained
+- ✅ **Dual Quality Modes**: Real-time streaming mode + High-quality content creation mode
+- ✅ **Real-Time Rendering**: <3s latency for live news broadcasts and chatbots
+- ✅ **High-Quality Output**: FOMM + Diff2Lip + GFPGAN for cinema-grade results
+- ✅ **Automatic Mode Selection**: Intelligent pipeline selection based on GPU availability
 - ✅ **GPU-Accelerated Encoding**: NVENC H.264 encoding achieving >200 FPS on V100 GPUs
 - ✅ **MCP STDIO Server**: Ready for AI agent integration with auto-discovery
-- ✅ **RESTful API**: FastAPI-based HTTP interface for traditional integrations
+- ✅ **RESTful API**: FastAPI-based HTTP interface with comprehensive health checks
 - ✅ **Face Enhancement**: Built-in GFPGAN support for improved output quality
-- ✅ **Phoneme Alignment**: Montreal Forced Aligner integration for precise lip-sync
+- ✅ **Installation Verification**: Automated checks for dependencies and configuration
 
 ### DevOps & Infrastructure
 
 - ✅ **Containerized**: Production-grade Dockerfile with CUDA 12.4 support
 - ✅ **Kubernetes-Ready**: Helm charts and raw manifests for K8s deployments
 - ✅ **Auto-Scaling**: KEDA integration for demand-based pod scaling
-- ✅ **CI/CD Pipelines**: GitHub Actions and Tekton configurations included
+- ✅ **CI/CD Pipelines**: Automated testing with GitHub Actions workflows
+- ✅ **Health Checks**: Comprehensive `/avatars` endpoint for model status
+- ✅ **Installation Verification**: Automated dependency and configuration validation
 - ✅ **Monitoring**: Prometheus metrics and structured logging
 - ✅ **Cloud Storage**: S3/COS integration for output delivery
 
@@ -93,14 +107,29 @@ make install
 make dev-install
 ```
 
-#### 4. Download Model Checkpoints
+#### 4. Verify Installation
+
+```bash
+# Run comprehensive installation verification
+python scripts/verify_installation.py
+```
+
+This will check:
+- ✅ Python version compatibility
+- ✅ All dependencies installed correctly
+- ✅ Module imports working
+- ✅ API endpoints configured
+- ✅ Quality modes available
+- ✅ GPU availability (optional)
+
+#### 5. Download Model Checkpoints
 
 ```bash
 # Downloads ~3GB of model weights
 make download-models
 ```
 
-#### 5. Run the Server
+#### 6. Run the Server
 
 ```bash
 # Start FastAPI REST server on http://localhost:8080
@@ -177,14 +206,101 @@ The gateway will automatically discover the `render_avatar` tool via `mcp-tool.j
 ```python
 from app.pipeline import render_pipeline
 
-# Generate talking head video
+# Real-time mode for live streaming
 render_pipeline(
     face_image="avatars/person.jpg",
     audio="audio/speech.wav",
     out_path="output/result.mp4",
-    reference_video=None  # Optional: provide driving video
+    quality_mode="real_time"  # Fast processing for streaming
+)
+
+# High-quality mode for YouTube content
+render_pipeline(
+    face_image="avatars/person.jpg",
+    audio="audio/speech.wav",
+    out_path="output/result.mp4",
+    quality_mode="high_quality"  # Best quality with GFPGAN
 )
 ```
+
+---
+
+## Quality Modes
+
+Avatar Renderer MCP supports **two distinct quality modes** optimized for different use cases:
+
+### 🚀 Real-Time Mode
+
+**Perfect for live streaming, news broadcasts, and interactive chatbots**
+
+- **Speed**: <3 seconds latency (512x512 @ 25fps)
+- **Pipeline**: SadTalker + Wav2Lip
+- **Bitrate**: 2 Mbps (optimized for streaming)
+- **GPU**: Optional (CPU fallback available)
+- **Enhancement**: Disabled for speed
+
+**Use Cases:**
+- 📺 Live news broadcasts and virtual anchors
+- 💬 Real-time AI chatbots and assistants
+- 🎥 Live streaming on Twitch/YouTube
+- 🎭 Interactive virtual avatars
+
+**Example:**
+```bash
+curl -X POST http://localhost:8080/render \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "avatarPath": "/path/to/avatar.png",
+    "audioPath": "/path/to/speech.wav",
+    "qualityMode": "real_time"
+  }'
+```
+
+### 🎨 High-Quality Mode
+
+**Perfect for YouTube videos, marketing content, and professional productions**
+
+- **Quality**: Maximum with GFPGAN face enhancement
+- **Pipeline**: FOMM + Diff2Lip + GFPGAN
+- **Bitrate**: 6 Mbps (cinema quality)
+- **GPU**: Required (V100 or better recommended)
+- **Enhancement**: Full GFPGAN + RealESRGAN
+
+**Use Cases:**
+- 🎬 YouTube content and tutorials
+- 📢 Marketing and explainer videos
+- 🎓 Educational content and courses
+- 🎪 Professional virtual influencers
+
+**Example:**
+```bash
+curl -X POST http://localhost:8080/render \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "avatarPath": "/path/to/avatar.png",
+    "audioPath": "/path/to/speech.wav",
+    "qualityMode": "high_quality"
+  }'
+```
+
+### ⚙️ Auto Mode (Default)
+
+Automatically selects the best mode based on:
+- GPU availability
+- Model checkpoint availability
+- System resources
+
+**Comparison Table:**
+
+| Feature | Real-Time | High-Quality |
+|---------|-----------|--------------|
+| **Speed** | <3s | ~10-30s |
+| **GPU Required** | No | Yes |
+| **Bitrate** | 2 Mbps | 6 Mbps |
+| **Enhancement** | None | GFPGAN |
+| **Best For** | Live | Pre-recorded |
+
+📖 **Detailed documentation**: [docs/QUALITY_MODES.md](docs/QUALITY_MODES.md)
 
 ---
 
