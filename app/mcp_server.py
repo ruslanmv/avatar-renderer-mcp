@@ -5,20 +5,27 @@ mcp_server.py  –  STDIO server for MCP Gateway
 
 Exposes one tool:  render_avatar
   params:
-    avatar_path  – PNG/JPG still image
-    audio_path   – WAV/MP3/OGG speech
-    driver_video – optional MP4 for head‑pose (FOMM)  [default: None]
+    avatar_path   – PNG/JPG still image
+    audio_path    – WAV/MP3/OGG speech
+    driver_video  – optional MP4 for head‑pose (FOMM)  [default: None]
+    viseme_json   – optional phoneme/viseme alignment JSON
+    quality_mode  – "real_time" | "high_quality" | "auto" [default: "auto"]
+
+Quality Modes:
+  real_time     – Fast processing for streaming (SadTalker + Wav2Lip)
+  high_quality  – Best quality for content (FOMM + Diff2Lip + GFPGAN)
+  auto          – Automatically select based on GPU and models
 
 The server reads line‑delimited JSON on **stdin** and writes replies on **stdout**.
 
 Successful reply:
-  { "jobId": "<uuid>", "output": "/tmp/<uuid>.mp4" }
+  { "jobId": "<uuid>", "output": "/tmp/<uuid>.mp4", "qualityMode": "real_time" }
 
 Error reply:
   { "error": "<string>" }
 
 You can run it locally:
-  python -m app.mcp_server  < requests.txt
+  echo '{"tool":"render_avatar","params":{"avatar_path":"test.png","audio_path":"test.wav","quality_mode":"real_time"}}' | python -m app.mcp_server
 """
 from __future__ import annotations
 
@@ -33,7 +40,7 @@ import uuid
 from pathlib import Path
 from typing import Dict, Optional
 
-from pipeline import render_pipeline
+from .pipeline import render_pipeline
 
 # ───────────────────────  optional Kafka progress  ───────────────────────── #
 try:
@@ -93,18 +100,24 @@ def _worker_loop() -> None:
             continue
 
         job_id = job["job_id"]
+        quality_mode = job.get("quality_mode", "auto")
         try:
-            _emit_progress(job_id, "started")
-            render_pipeline(
+            _emit_progress(job_id, "started", {"qualityMode": quality_mode})
+            result_path = render_pipeline(
                 face_image=job["avatar_path"],
                 audio=job["audio_path"],
                 reference_video=job.get("driver_video"),
                 viseme_json=job.get("viseme_json"),
+                quality_mode=quality_mode,
                 out_path=job["out_path"],
             )
-            _emit_progress(job_id, "finished", {"output": job["out_path"]})
+            _emit_progress(job_id, "finished", {"output": result_path, "qualityMode": quality_mode})
             job["on_done"](
-                {"jobId": job_id, "output": job["out_path"]},
+                {
+                    "jobId": job_id,
+                    "output": result_path,
+                    "qualityMode": quality_mode,
+                },
                 error=None,
             )
         except Exception as exc:
@@ -155,6 +168,7 @@ def _handle_request(req: Dict):
             "audio_path": req["params"]["audio_path"],
             "driver_video": req["params"].get("driver_video"),
             "viseme_json": req["params"].get("viseme_json"),
+            "quality_mode": req["params"].get("quality_mode", "auto"),
             "out_path": out_mp4,
             "on_done": _done,
         }
