@@ -113,38 +113,94 @@ jobs:
       - name: 🚀 Start API server
         run: |
           cd app
-          python -m uvicorn api:app --host 0.0.0.0 --port 8000 &
-          sleep 5
-          echo "API_PID=$!" >> $GITHUB_ENV
+          python -m uvicorn api:app --host 0.0.0.0 --port 8000 > ../uvicorn.log 2>&1 &
+          UVICORN_PID=$!
+          echo "UVICORN_PID=$UVICORN_PID" >> $GITHUB_ENV
+          echo "Started uvicorn with PID: $UVICORN_PID"
+
+          # Wait for server to be ready
+          echo "Waiting for API server to be ready..."
+          for i in {1..30}; do
+            if curl -s http://localhost:8000/health/live > /dev/null 2>&1; then
+              echo "✓ API server is ready!"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "❌ API server failed to start within 30 seconds"
+              echo "=== Uvicorn logs ==="
+              cat ../uvicorn.log
+              exit 1
+            fi
+            echo "Attempt $i/30: Server not ready yet, waiting..."
+            sleep 1
+          done
 
       - name: 🏥 Test /health/live endpoint
         run: |
           response=$(curl -s http://localhost:8000/health/live)
           echo "Response: $response"
-          echo "$response" | grep -q '"status":"alive"' || (echo "Health check failed" && exit 1)
-          echo "✓ /health/live endpoint working"
+          if echo "$response" | grep -q '"status":"alive"'; then
+            echo "✓ /health/live endpoint working"
+          else
+            echo "❌ Health check failed"
+            echo "=== Uvicorn logs ==="
+            cat uvicorn.log
+            exit 1
+          fi
 
       - name: 🏥 Test /health/ready endpoint
         run: |
           response=$(curl -s http://localhost:8000/health/ready)
           echo "Response: $response"
-          echo "$response" | grep -q '"status":"ready"' || (echo "Readiness check failed" && exit 1)
-          echo "✓ /health/ready endpoint working"
+          if echo "$response" | grep -q '"status":"ready"'; then
+            echo "✓ /health/ready endpoint working"
+          else
+            echo "❌ Readiness check failed"
+            exit 1
+          fi
 
       - name: 🎭 Test /avatars endpoint
         run: |
           response=$(curl -s http://localhost:8000/avatars)
           echo "Response: $response"
-          echo "$response" | grep -q '"status":"ready"' || (echo "Avatars endpoint failed" && exit 1)
-          echo "$response" | grep -q 'rendering_modes' || (echo "Rendering modes missing" && exit 1)
-          echo "$response" | grep -q 'real_time' || (echo "Real-time mode missing" && exit 1)
-          echo "$response" | grep -q 'high_quality' || (echo "High-quality mode missing" && exit 1)
-          echo "✓ /avatars endpoint working with quality modes"
+          if echo "$response" | grep -q '"status":"ready"'; then
+            echo "✓ /avatars endpoint responding"
+          else
+            echo "❌ /avatars endpoint failed"
+            exit 1
+          fi
+
+          # Validate required fields
+          if echo "$response" | grep -q 'rendering_modes'; then
+            echo "✓ rendering_modes field present"
+          else
+            echo "❌ rendering_modes field missing"
+            exit 1
+          fi
+
+          if echo "$response" | grep -q 'real_time'; then
+            echo "✓ real_time mode present"
+          else
+            echo "❌ real_time mode missing"
+            exit 1
+          fi
+
+          if echo "$response" | grep -q 'high_quality'; then
+            echo "✓ high_quality mode present"
+          else
+            echo "❌ high_quality mode missing"
+            exit 1
+          fi
 
       - name: 📊 Save avatars response
         if: always()
         run: |
-          curl -s http://localhost:8000/avatars | python -m json.tool > avatars-response.json
+          response=$(curl -s http://localhost:8000/avatars)
+          if [ -n "$response" ]; then
+            echo "$response" | python -m json.tool > avatars-response.json || echo "$response" > avatars-response.json
+          else
+            echo '{"error": "No response from server"}' > avatars-response.json
+          fi
           cat avatars-response.json
 
       - name: 📤 Upload avatars response
@@ -158,6 +214,9 @@ jobs:
       - name: 🧹 Cleanup
         if: always()
         run: |
+          if [ -n "$UVICORN_PID" ]; then
+            kill $UVICORN_PID 2>/dev/null || true
+          fi
           pkill -f "uvicorn" || true
 
   test-mcp-server:
