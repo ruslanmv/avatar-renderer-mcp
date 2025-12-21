@@ -1,8 +1,10 @@
 """
 api.py  –  FastAPI front‑door for the Avatar Renderer Pod
 ==========================================================
-* POST /render          → returns {jobId, statusUrl, async}
+* POST /render          → returns {jobId, statusUrl, async} (expects server-side file paths)
+* POST /render-upload   → upload avatar + audio, returns {jobId, statusUrl, async} (browser-friendly)
 * GET  /status/{id}     → returns either {"state": "..."} or the MP4 file
+* GET  /avatars         → list available models and system capabilities
 * GET  /health/live     → liveness probe  (200 OK)
 * GET  /health/ready    → readiness probe (checks Celery broker if present)
 """
@@ -10,11 +12,13 @@ api.py  –  FastAPI front‑door for the Avatar Renderer Pod
 from __future__ import annotations
 
 import json
+import shutil
 import uuid
 from pathlib import Path
 from typing import Optional
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
@@ -45,6 +49,20 @@ app = FastAPI(
     title="avatar‑renderer‑svc",
     version="0.1.0",
     description="Generate a lip‑synced avatar video (REST façade)",
+)
+
+# ───────────────────────────── CORS setup ────────────────────────────────── #
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "https://*.vercel.app",
+        "https://vercel.app",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 WORK_ROOT = Path("/tmp/avatar-jobs")
@@ -115,6 +133,63 @@ def render_job(body: RenderBody, bg: BackgroundTasks):
 
     # save original request
     (job_dir / "request.json").write_text(json.dumps(body.dict(by_alias=True), indent=2))
+
+    if celery_available:
+        task = _render_video_task.delay(payload)  # type: ignore
+        (job_dir / "celery_id").write_text(task.id)
+        async_mode = True
+    else:
+        bg.add_task(_render_video_thread, payload)
+        async_mode = False
+
+    return {
+        "jobId": job_id,
+        "statusUrl": f"/status/{job_id}",
+        "async": async_mode,
+    }
+
+
+@app.post("/render-upload")
+async def render_upload(
+    bg: BackgroundTasks,
+    avatar: UploadFile = File(...),
+    audio: UploadFile = File(...),
+    qualityMode: str = Form("auto"),
+):
+    """Upload avatar image + audio, start render job, return jobId + status URL."""
+    job_id = str(uuid.uuid4())
+    job_dir = WORK_ROOT / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save uploaded files
+    avatar_path = job_dir / f"avatar_{avatar.filename}"
+    audio_path = job_dir / f"audio_{audio.filename}"
+    out_mp4 = job_dir / "out.mp4"
+
+    with avatar_path.open("wb") as f:
+        shutil.copyfileobj(avatar.file, f)
+    with audio_path.open("wb") as f:
+        shutil.copyfileobj(audio.file, f)
+
+    payload = {
+        "job_id": job_id,
+        "avatar_path": str(avatar_path),
+        "audio_path": str(audio_path),
+        "quality_mode": qualityMode,
+        "out_path": str(out_mp4),
+    }
+
+    # save upload metadata
+    (job_dir / "upload.json").write_text(
+        json.dumps(
+            {
+                "avatar_filename": avatar.filename,
+                "audio_filename": audio.filename,
+                "quality_mode": qualityMode,
+            },
+            indent=2,
+        )
+    )
 
     if celery_available:
         task = _render_video_task.delay(payload)  # type: ignore

@@ -225,6 +225,55 @@ render_pipeline(
 
 ---
 
+## Frontend (Vercel Deployment)
+
+A professional, production-ready **Next.js frontend** is included in the `frontend/` directory, providing a beautiful web UI for the Avatar Renderer MCP service.
+
+### Features
+
+- 🎨 **Futuristic UI** with smooth animations and modern design
+- 📤 **File Upload** for avatar images and audio files
+- 🎭 **Avatar Gallery** with pre-built avatar options
+- 📊 **Real-time Progress** tracking with visual feedback
+- 🎬 **Video Preview** with autoplay and download
+- 📋 **Copy-to-Clipboard** React embed snippets
+- 📱 **Fully Responsive** for all screen sizes
+- ⚡ **Optimized for Vercel** deployment
+
+### Quick Start (Frontend)
+
+```bash
+# Navigate to frontend directory
+cd frontend
+
+# Install dependencies
+npm install
+
+# Configure backend URL
+cp .env.example .env.local
+# Edit .env.local and set NEXT_PUBLIC_AVATAR_API_BASE
+
+# Start development server
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) to see the UI.
+
+### Deploy to Vercel
+
+```bash
+cd frontend
+vercel
+```
+
+Set the environment variable `NEXT_PUBLIC_AVATAR_API_BASE` to your backend URL in the Vercel dashboard.
+
+**Important**: The backend **cannot** run on Vercel (requires GPU + large models). Deploy the backend to a GPU-enabled server (AWS/GCP/Azure VM, RunPod, etc.) and point the frontend to it.
+
+See [frontend/README.md](frontend/README.md) for detailed documentation.
+
+---
+
 ## Quality Modes
 
 Avatar Renderer MCP supports **two distinct quality modes** optimized for different use cases:
@@ -482,6 +531,18 @@ avatar-renderer-mcp/
 │   ├── settings.py            # Configuration management
 │   ├── viseme_align.py        # Phoneme-to-viseme alignment
 │   └── worker.py              # Celery task worker
+├── frontend/                   # Next.js web UI (Vercel-ready)
+│   ├── app/                   # Next.js App Router
+│   │   ├── page.tsx          # Main page with interactive wizard
+│   │   ├── layout.tsx        # Root layout
+│   │   └── globals.css       # Global styles + Tailwind
+│   ├── public/                # Static assets
+│   ├── package.json           # Frontend dependencies
+│   ├── next.config.js         # Next.js configuration
+│   ├── tailwind.config.js     # Tailwind configuration
+│   ├── tsconfig.json          # TypeScript configuration
+│   ├── vercel.json            # Vercel deployment config
+│   └── README.md              # Frontend documentation
 ├── tests/                      # Test suite
 │   ├── __init__.py
 │   ├── conftest.py
