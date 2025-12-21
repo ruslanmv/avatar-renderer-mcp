@@ -49,6 +49,7 @@ dependencies = [
     # Web framework & server
     "fastapi>=0.116.1,<0.117.0",
     "uvicorn[standard]>=0.23.2,<0.24.0",
+    "python-multipart>=0.0.5,<0.1.0",
 
     # Task queue
     "celery>=5.5.3,<6.0.0",
