@@ -38,7 +38,7 @@ jobs:
           python -m pip install --upgrade pip setuptools wheel
           python -m pip install fastapi uvicorn pydantic==2.11.1 requests \
                       torch==2.6.0 pydantic-settings==2.10.1 \
-                      numpy
+                      numpy python-multipart
 
       # Download pretrained model checkpoints
       - name: 💾 Download model checkpoints
@@ -62,8 +62,9 @@ jobs:
               break
             fi
             if [ $i -eq 30 ]; then
-              echo "⚠️  Server did not start within 30 seconds"
+              echo "❌ Server did not start within 30 seconds"
               cat uvicorn.log
+              exit 1
             fi
             sleep 1
           done
@@ -75,8 +76,12 @@ jobs:
 
       - name: 🔍 GET /avatars
         run: |
+          set +e
           response=$(curl -sf http://localhost:$BACKEND_PORT/avatars)
-          if [ $? -eq 0 ]; then
+          code=$?
+          set -e
+
+          if [ $code -eq 0 ]; then
             echo "✓ /avatars endpoint responded"
             echo "$response" | head -20
           else
