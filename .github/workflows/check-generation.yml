@@ -39,7 +39,7 @@ jobs:
       - name: 📦 Install dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel hatchling
-          python -m pip install fastapi uvicorn pydantic pydantic-settings torch pytest httpx
+          python -m pip install fastapi uvicorn pydantic pydantic-settings torch pytest httpx python-multipart
 
       - name: ✅ Run installation verification
         run: |
@@ -71,7 +71,7 @@ jobs:
       - name: 📦 Install dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          python -m pip install fastapi uvicorn pydantic pydantic-settings torch pytest httpx
+          python -m pip install fastapi uvicorn pydantic pydantic-settings torch pytest httpx python-multipart
 
       - name: 🔍 Test module imports
         run: |
@@ -108,7 +108,7 @@ jobs:
       - name: 📦 Install dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          python -m pip install fastapi uvicorn pydantic pydantic-settings torch pytest httpx
+          python -m pip install fastapi uvicorn pydantic pydantic-settings torch pytest httpx python-multipart
 
       - name: 🚀 Start API server
         run: |
@@ -238,7 +238,7 @@ jobs:
       - name: 📦 Install dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          python -m pip install fastapi uvicorn pydantic pydantic-settings torch pytest httpx
+          python -m pip install fastapi uvicorn pydantic pydantic-settings torch pytest httpx python-multipart
 
       - name: 🤖 Test MCP server help
         run: |
