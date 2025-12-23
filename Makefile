@@ -128,8 +128,17 @@ run-stdio: install ## Start MCP STDIO server
 # Testing
 # ─────────────────────────────────────────────────────────────────────────────
 
+.PHONY: test-light
+test-light: install ## Run lightweight health check tests (fast)
+	@printf "$(BLUE)Running lightweight health checks...$(RESET)\n"
+	@PYTHONPATH=$(CURDIR)/$(EXT_DEPS_DIR):$(PYTHONPATH) \
+		MODEL_ROOT=$(MODELS_DIR) \
+		EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
+		$(VENV_BIN)/python tests/test_health.py
+	@printf "$(GREEN)✓ Health checks complete$(RESET)\n"
+
 .PHONY: test
-test: dev-install ## Run test suite with coverage
+test: dev-install ## Run full test suite with coverage
 	@printf "$(BLUE)Running tests...$(RESET)\n"
 	@PYTHONPATH=$(CURDIR)/$(EXT_DEPS_DIR):$(PYTHONPATH) \
 		$(VENV_BIN)/pytest -v
