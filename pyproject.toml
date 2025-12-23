@@ -74,6 +74,9 @@ dependencies = [
     "librosa>=0.10.0,<0.11.0",
     "soundfile>=0.12.0,<0.13.0",
 
+    # Video processing (required by first-order-model)
+    "ffmpeg-python>=0.2.0",
+
     # Networking & cloud
     "requests>=2.31.0,<3.0.0",
     "boto3>=1.26.160,<2.0.0",
@@ -292,6 +295,7 @@ module = [
     "torch.*",
     "torchvision.*",
     "textgrid.*",
+    "ffmpeg.*",
     "first_order_model.*",
     "diff2lip.*",
     "sadtalker.*",

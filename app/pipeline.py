@@ -28,7 +28,7 @@ import torch
 # --------------------------------------------------------------------------- #
 MODEL_ROOT = Path(os.environ.get("MODEL_ROOT", "/models"))
 
-FOMM_CKPT   = MODEL_ROOT / "fomm" / "vox-cpk.pth.tar"
+FOMM_CKPT   = MODEL_ROOT / "fomm" / "vox-cpk.pth"
 D2L_CKPT    = MODEL_ROOT / "diff2lip" / "Diff2Lip.pth"
 SAD_CKPT    = MODEL_ROOT / "sadtalker" / "sadtalker.pth"
 W2L_CKPT    = MODEL_ROOT / "wav2lip" / "wav2lip_gan.pth"
