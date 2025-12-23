@@ -89,18 +89,14 @@ install-git-deps: ## Clone external Git dependencies
 	@if [ ! -d "$(EXT_DEPS_DIR)/SadTalker" ]; then \
 		git clone --depth=1 https://github.com/OpenTalker/SadTalker.git $(EXT_DEPS_DIR)/SadTalker; \
 	fi
-	@if [ -f "$(EXT_DEPS_DIR)/SadTalker/requirements.txt" ]; then \
-		$(UV) pip install --python $(VENV_BIN)/python -r $(EXT_DEPS_DIR)/SadTalker/requirements.txt; \
-	fi
 	@if [ ! -d "$(EXT_DEPS_DIR)/first-order-model" ]; then \
 		git clone --depth=1 https://github.com/AliaksandrSiarohin/first-order-model.git $(EXT_DEPS_DIR)/first-order-model; \
 	fi
 	@if [ ! -d "$(EXT_DEPS_DIR)/Wav2Lip" ]; then \
 		git clone --depth=1 https://github.com/Rudrabha/Wav2Lip.git $(EXT_DEPS_DIR)/Wav2Lip; \
 	fi
-	@if [ -f "$(EXT_DEPS_DIR)/Wav2Lip/requirements.txt" ]; then \
-		$(UV) pip install --python $(VENV_BIN)/python -r $(EXT_DEPS_DIR)/Wav2Lip/requirements.txt; \
-	fi
+	@# Install only minimal safe dependencies (not full requirements.txt which has old opencv)
+	@$(UV) pip install --python $(VENV_BIN)/python yacs pyyaml imageio>=2.4.1
 	@printf "$(GREEN)✓ Git dependencies installed$(RESET)\n"
 
 .PHONY: download-models

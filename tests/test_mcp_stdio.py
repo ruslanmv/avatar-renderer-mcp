@@ -36,13 +36,15 @@ def _patch_pipeline(monkeypatch):
     empty MP4 so the API flow can complete instantly.
     """
 
-    def _fake_pipeline(face_image, audio, reference_video, out_path):
-        # write a trivial MP4 header so FFmpeg players don’t choke
+    def _fake_pipeline(*, face_image, audio, out_path, reference_video=None,
+                      viseme_json=None, quality_mode="auto"):
+        # write a trivial MP4 header so FFmpeg players don't choke
         TMP_OUT.write_bytes(b"\x00" * 1024)
         Path(out_path).write_bytes(TMP_OUT.read_bytes())
+        return str(out_path)  # Return the output path like the real function
 
-    # Patch inside *mcp_server* & *worker* import chain
-    monkeypatch.setattr("app.pipeline.render_pipeline", _fake_pipeline, raising=False)
+    # Patch the render_pipeline as imported in api.py
+    monkeypatch.setattr("app.api.render_pipeline", _fake_pipeline, raising=False)
     yield
     if TMP_OUT.exists():
         TMP_OUT.unlink()
@@ -66,21 +68,26 @@ TEST_WAV = ASSETS_DIR / "hello.wav"
 # 3 · Actual tests                                                             #
 # --------------------------------------------------------------------------- #
 def test_list_avatars(tmp_path, monkeypatch):
-    # monkey‑patch AVATAR_DIR to point at our test asset
-    monkeypatch.setattr(api_module, "AVATAR_DIR", tmp_path)
-    (tmp_path / "alice.png").write_bytes(b"\x89PNG\r\n\x1a\n")  # stub PNG
-
+    # No need to patch AVATAR_DIR - the endpoint returns model status
     res = client.get("/avatars")
     assert res.status_code == 200
-    assert res.json() == ["alice"]
+
+    # Verify response structure
+    data = res.json()
+    assert "status" in data
+    assert "models" in data
+    assert "system" in data
+    assert "rendering_modes" in data
+    assert data["status"] == "ready"
 
 
 def test_render_flow(monkeypatch):
-    # 1) Patch AVATAR_DIR so the service “finds” our face asset
-    monkeypatch.setattr(api_module, "AVATAR_DIR", TEST_FACE.parent)
-
-    # 2) POST render request
-    payload = {"avatarId": "alice", "voiceUrl": TEST_WAV.as_uri()}
+    # POST render request with correct payload format
+    payload = {
+        "avatarPath": str(TEST_FACE),
+        "audioPath": str(TEST_WAV),
+        "qualityMode": "auto"
+    }
     res = client.post("/render", json=payload)
     assert res.status_code == 200
 
@@ -91,7 +98,7 @@ def test_render_flow(monkeypatch):
     UUID(job_id)  # throws if invalid
     assert status_url.endswith(job_id)
 
-    # 3) Immediately poll status – our stub writes output synchronously
+    # Immediately poll status – our stub writes output synchronously
     res2 = client.get(f"/status/{job_id}")
     # Must be 200 and an MP4
     assert res2.status_code == 200

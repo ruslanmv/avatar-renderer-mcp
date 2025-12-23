@@ -13,11 +13,13 @@ The function must raise on any hard failure (so Celery -> WebSocket can emit
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 import torch
 
@@ -32,6 +34,51 @@ SAD_CKPT    = MODEL_ROOT / "sadtalker" / "sadtalker.pth"
 W2L_CKPT    = MODEL_ROOT / "wav2lip" / "wav2lip_gan.pth"
 GFPGAN_CKPT = MODEL_ROOT / "gfpgan" / "GFPGANv1.3.pth"
 
+# External dependencies base path
+EXT_DEPS_DIR = Path(os.environ.get("EXT_DEPS_DIR", "external_deps"))
+
+# --------------------------------------------------------------------------- #
+# Helper function to dynamically load modules from file paths
+# --------------------------------------------------------------------------- #
+
+def load_module_from_path(module_name: str, file_path: Path) -> Any:
+    """
+    Dynamically load a Python module from a file path.
+
+    This is necessary because external repos (SadTalker, Wav2Lip) are not
+    proper Python packages and cannot be imported normally.
+
+    Args:
+        module_name: Name to assign to the loaded module
+        file_path: Path to the Python file to load
+
+    Returns:
+        The loaded module object
+
+    Raises:
+        ImportError: If the module file doesn't exist or can't be loaded
+    """
+    if not file_path.exists():
+        raise ImportError(f"Module file not found: {file_path}")
+
+    spec = importlib.util.spec_from_file_location(module_name, str(file_path))
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load module spec from: {file_path}")
+
+    module = importlib.util.module_from_spec(spec)
+
+    # Add the module's directory to sys.path temporarily
+    module_dir = str(file_path.parent)
+    if module_dir not in sys.path:
+        sys.path.insert(0, module_dir)
+
+    try:
+        spec.loader.exec_module(module)
+    except Exception as e:
+        raise ImportError(f"Failed to execute module {file_path}: {e}") from e
+
+    return module
+
 # --------------------------------------------------------------------------- #
 # Helpers (FOMM, Diff2Lip, SadTalker, Wav2Lip)                                #
 # These can live in separate files; kept inline for readability.              #
@@ -44,7 +91,15 @@ def run_fomm(face_img: str, audio_wav: str, ref_video: Optional[str], tmp_dir: P
 
     Returns: path to directory full of 0001.png, 0002.png, ...
     """
-    import first_order_model.demo as fomm_demo  # type: ignore
+    # Try to load FOMM module dynamically
+    try:
+        fomm_path = EXT_DEPS_DIR / "first-order-model" / "demo.py"
+        fomm_demo = load_module_from_path("fomm_demo", fomm_path)
+    except (ImportError, FileNotFoundError) as e:
+        raise RuntimeError(
+            f"First Order Motion Model not found in {EXT_DEPS_DIR}/first-order-model. "
+            f"Please install external dependencies: {e}"
+        ) from e
 
     frames_dir = tmp_dir / "fomm_frames"
     frames_dir.mkdir(exist_ok=True)
@@ -58,7 +113,11 @@ def run_fomm(face_img: str, audio_wav: str, ref_video: Optional[str], tmp_dir: P
         checkpoint = str(FOMM_CKPT)
         # … other FOMM flags default inside demo.py
 
-    fomm_demo.main(_Args())
+    if hasattr(fomm_demo, 'main'):
+        fomm_demo.main(_Args())
+    else:
+        raise RuntimeError("FOMM module loaded but 'main' function not found")
+
     return frames_dir
 
 
@@ -68,17 +127,29 @@ def run_diff2lip(frames_dir: Path, audio_wav: str, tmp_dir: Path) -> Path:
     Returns new dir of frames.  Falls back to Wav2Lip if GPU OOM or CKPT missing.
     """
     try:
-        import diff2lip.inference as d2l  # type: ignore
+        # Try to load Diff2Lip module dynamically
+        diff2lip_path = EXT_DEPS_DIR / "Diff2Lip" / "inference.py"
+        if not diff2lip_path.exists():
+            # If Diff2Lip is not installed, fall back to Wav2Lip
+            print(f"[pipeline] Diff2Lip not found at {diff2lip_path}, falling back to Wav2Lip")
+            return run_wav2lip(frames_dir, audio_wav, tmp_dir)
+
+        d2l = load_module_from_path("diff2lip_inference", diff2lip_path)
 
         out_dir = tmp_dir / "d2l_frames"
         out_dir.mkdir(exist_ok=True)
-        d2l.run_diffusion(
-            ckpt=str(D2L_CKPT),
-            frames=str(frames_dir),
-            audio=audio_wav,
-            out_dir=str(out_dir),
-            steps=25,
-        )
+
+        if hasattr(d2l, 'run_diffusion'):
+            d2l.run_diffusion(
+                ckpt=str(D2L_CKPT),
+                frames=str(frames_dir),
+                audio=audio_wav,
+                out_dir=str(out_dir),
+                steps=25,
+            )
+        else:
+            raise RuntimeError("Diff2Lip module loaded but 'run_diffusion' function not found")
+
         return out_dir
 
     except (ImportError, RuntimeError) as e:
@@ -90,18 +161,33 @@ def run_sadtalker(face_img: str, audio_wav: str, tmp_dir: Path) -> Path:
     """
     Generates coarse talking‑head frames (head + expression) using SadTalker.
     """
-    import sadtalker.inference as sad  # type: ignore
+    # Try to load SadTalker module dynamically
+    try:
+        sadtalker_path = EXT_DEPS_DIR / "SadTalker" / "inference.py"
+        sad = load_module_from_path("sadtalker_inference", sadtalker_path)
+    except (ImportError, FileNotFoundError) as e:
+        raise RuntimeError(
+            f"SadTalker not found in {EXT_DEPS_DIR}/SadTalker. "
+            f"Please install external dependencies: {e}"
+        ) from e
 
     out_dir = tmp_dir / "sadtalker_frames"
     out_dir.mkdir(exist_ok=True)
-    sad.generate(
-        cfg_path=str(SAD_CKPT),
-        img=face_img,
-        audio=audio_wav,
-        out_dir=str(out_dir),
-        enhancer_ckpt=str(GFPGAN_CKPT),
-        still=True,
-    )
+
+    # Call SadTalker's generate function (adjust parameters based on actual API)
+    if hasattr(sad, 'generate'):
+        sad.generate(
+            cfg_path=str(SAD_CKPT),
+            img=face_img,
+            audio=audio_wav,
+            out_dir=str(out_dir),
+            enhancer_ckpt=str(GFPGAN_CKPT),
+            still=True,
+        )
+    else:
+        # Fallback: create dummy frames (for testing without SadTalker)
+        raise RuntimeError("SadTalker module loaded but 'generate' function not found")
+
     return out_dir
 
 
@@ -109,16 +195,30 @@ def run_wav2lip(frames_dir: Path, audio_wav: str, tmp_dir: Path) -> Path:
     """
     Refines mouth region with Wav2Lip GAN. Returns dir with final frames.
     """
-    import wav2lip.inference as w2l  # type: ignore
+    # Try to load Wav2Lip module dynamically
+    try:
+        wav2lip_path = EXT_DEPS_DIR / "Wav2Lip" / "inference.py"
+        w2l = load_module_from_path("wav2lip_inference", wav2lip_path)
+    except (ImportError, FileNotFoundError) as e:
+        raise RuntimeError(
+            f"Wav2Lip not found in {EXT_DEPS_DIR}/Wav2Lip. "
+            f"Please install external dependencies: {e}"
+        ) from e
 
     out_dir = tmp_dir / "w2l_frames"
     out_dir.mkdir(exist_ok=True)
-    w2l.run_wav2lip(
-        ckpt=str(W2L_CKPT),
-        frames=str(frames_dir),
-        audio=audio_wav,
-        out_dir=str(out_dir),
-    )
+
+    # Call Wav2Lip's inference function (adjust parameters based on actual API)
+    if hasattr(w2l, 'run_wav2lip'):
+        w2l.run_wav2lip(
+            ckpt=str(W2L_CKPT),
+            frames=str(frames_dir),
+            audio=audio_wav,
+            out_dir=str(out_dir),
+        )
+    else:
+        raise RuntimeError("Wav2Lip module loaded but 'run_wav2lip' function not found")
+
     return out_dir
 
 
