@@ -160,7 +160,7 @@ class Settings(BaseSettings):
     )
 
     GFPGAN_CKPT: Path = Field(
-        default=Path("/models/gfpgan/GFPGANv1.4.pth"),
+        default=Path("/models/gfpgan/GFPGANv1.3.pth"),
         description="Full path to GFPGAN face enhancement checkpoint file",
     )
 
