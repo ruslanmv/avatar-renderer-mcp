@@ -95,6 +95,11 @@ install-git-deps: ## Clone external Git dependencies
 	@if [ ! -d "$(EXT_DEPS_DIR)/Wav2Lip" ]; then \
 		git clone --depth=1 https://github.com/Rudrabha/Wav2Lip.git $(EXT_DEPS_DIR)/Wav2Lip; \
 	fi
+	@# Apply FOMM wrapper patch (provides main() function interface)
+	@if [ -f "patches/fomm/fomm_wrapper.py" ]; then \
+		cp patches/fomm/fomm_wrapper.py $(EXT_DEPS_DIR)/first-order-model/fomm_wrapper.py; \
+		printf "$(GREEN)✓ FOMM wrapper installed$(RESET)\n"; \
+	fi
 	@# Install only minimal safe dependencies (not full requirements.txt which has old opencv)
 	@$(UV) pip install --python $(VENV_BIN)/python yacs pyyaml imageio>=2.4.1
 	@printf "$(GREEN)✓ Git dependencies installed$(RESET)\n"
