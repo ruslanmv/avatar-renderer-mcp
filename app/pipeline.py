@@ -28,7 +28,7 @@ import torch
 # --------------------------------------------------------------------------- #
 MODEL_ROOT = Path(os.environ.get("MODEL_ROOT", "/models"))
 
-FOMM_CKPT   = MODEL_ROOT / "fomm" / "vox-cpk.pth.tar"
+FOMM_CKPT   = MODEL_ROOT / "fomm" / "vox-cpk.pth"
 D2L_CKPT    = MODEL_ROOT / "diff2lip" / "Diff2Lip.pth"
 SAD_CKPT    = MODEL_ROOT / "sadtalker" / "sadtalker.pth"
 W2L_CKPT    = MODEL_ROOT / "wav2lip" / "wav2lip_gan.pth"
@@ -36,6 +36,57 @@ GFPGAN_CKPT = MODEL_ROOT / "gfpgan" / "GFPGANv1.3.pth"
 
 # External dependencies base path
 EXT_DEPS_DIR = Path(os.environ.get("EXT_DEPS_DIR", "external_deps"))
+
+# --------------------------------------------------------------------------- #
+# Runtime dependency availability checks
+# --------------------------------------------------------------------------- #
+
+def _can_import(module_name: str) -> bool:
+    """Check if a Python module can be imported."""
+    return importlib.util.find_spec(module_name) is not None
+
+def _ffmpeg_binary_available() -> bool:
+    """Check if system ffmpeg binary is available."""
+    import shutil
+    return shutil.which("ffmpeg") is not None
+
+def _python_ffmpeg_available() -> bool:
+    """Check if ffmpeg-python package is installed."""
+    try:
+        import ffmpeg  # type: ignore  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+def _fomm_runtime_available() -> tuple[bool, str]:
+    """
+    Check if FOMM can actually run (not just checkpoint exists).
+
+    Returns:
+        (ok, reason): ok=True if FOMM runtime is available, reason explains why not
+    """
+    # Check external repo exists
+    fomm_demo_py = EXT_DEPS_DIR / "first-order-model" / "demo.py"
+    if not fomm_demo_py.exists():
+        return (False, f"Missing first-order-model repo at {fomm_demo_py}")
+
+    # Check ffmpeg-python is installed (required by FOMM demo.py)
+    if not _python_ffmpeg_available():
+        return (False, "Missing python package 'ffmpeg' (install: pip install ffmpeg-python)")
+
+    # Check system ffmpeg binary exists
+    if not _ffmpeg_binary_available():
+        return (False, "Missing system 'ffmpeg' binary (install via apt-get/brew/choco)")
+
+    # Try importing FOMM demo as smoke test
+    try:
+        # We don't fully load it here (that happens in run_fomm), just check it's importable
+        spec = importlib.util.spec_from_file_location("_fomm_test", fomm_demo_py)
+        if spec is None or spec.loader is None:
+            return (False, f"Cannot create spec for {fomm_demo_py}")
+        return (True, "")
+    except Exception as e:
+        return (False, f"FOMM import test failed: {e}")
 
 # --------------------------------------------------------------------------- #
 # Helper function to dynamically load modules from file paths
@@ -380,29 +431,46 @@ def render_pipeline(
     try:
         # Determine which pipeline to use
         cuda_available = torch.cuda.is_available()
-        fomm_available = FOMM_CKPT.exists()
-        diff2lip_available = D2L_CKPT.exists()
+
+        # Check model checkpoints exist
+        fomm_ckpt_exists = FOMM_CKPT.exists()
+        diff2lip_ckpt_exists = D2L_CKPT.exists()
         sadtalker_available = SAD_CKPT.exists()
         wav2lip_available = W2L_CKPT.exists()
 
+        # Check HQ runtime dependencies (not just checkpoints)
+        fomm_runtime_ok, fomm_reason = _fomm_runtime_available() if fomm_ckpt_exists else (False, "FOMM checkpoint missing")
+
+        # HQ is only truly available if ALL requirements met
+        hq_available = cuda_available and fomm_ckpt_exists and diff2lip_ckpt_exists and fomm_runtime_ok
+
+        if not fomm_runtime_ok and fomm_ckpt_exists:
+            logger.warning(f"[pipeline] HQ models present but runtime unavailable: {fomm_reason}")
+
         # Auto-select quality mode if not specified
         if quality_mode == "auto":
-            if cuda_available and fomm_available and diff2lip_available:
+            if hq_available:
                 quality_mode = "high_quality"
-                logger.info("[pipeline] Auto-selected high_quality mode (GPU + FOMM available)")
+                logger.info("[pipeline] Auto-selected high_quality mode (GPU + HQ stack fully available)")
             elif sadtalker_available and wav2lip_available:
                 quality_mode = "real_time"
-                logger.info("[pipeline] Auto-selected real_time mode (fallback models available)")
+                logger.info("[pipeline] Auto-selected real_time mode (HQ unavailable, using fallback)")
             else:
                 raise RuntimeError("No suitable models available for rendering")
 
         # Execute pipeline based on quality mode
         if quality_mode == "high_quality":
-            if not (cuda_available and fomm_available and diff2lip_available):
-                raise RuntimeError(
-                    "high_quality mode requires GPU and FOMM+Diff2Lip models. "
-                    "Use real_time mode or ensure models are downloaded."
-                )
+            if not hq_available:
+                # Provide specific error message based on what's missing
+                if not cuda_available:
+                    raise RuntimeError("high_quality mode requires GPU (CUDA). Use real_time mode instead.")
+                elif not fomm_runtime_ok:
+                    raise RuntimeError(f"high_quality mode runtime unavailable: {fomm_reason}")
+                else:
+                    raise RuntimeError(
+                        "high_quality mode requires FOMM+Diff2Lip models. "
+                        "Use real_time mode or ensure models are downloaded."
+                    )
             logger.info("[pipeline] Using HIGH QUALITY pipeline: FOMM + Diff2Lip + GFPGAN")
             fomm_frames = run_fomm(face_image, audio, reference_video, tmp)
             lip_frames = run_diff2lip(fomm_frames, audio, tmp)
