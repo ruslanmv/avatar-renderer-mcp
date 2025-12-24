@@ -73,6 +73,11 @@ dependencies = [
     # Audio processing
     "librosa>=0.10.0,<0.11.0",
     "soundfile>=0.12.0,<0.13.0",
+    "numba>=0.58.0",  # Required for Python 3.11+ compatibility
+
+    # Video processing (required by first-order-model)
+    "ffmpeg-python>=0.2.0",
+    "pandas>=2.0.0",  # Required by first-order-model
 
     # Networking & cloud
     "requests>=2.31.0,<3.0.0",
@@ -292,6 +297,7 @@ module = [
     "torch.*",
     "torchvision.*",
     "textgrid.*",
+    "ffmpeg.*",
     "first_order_model.*",
     "diff2lip.*",
     "sadtalker.*",
