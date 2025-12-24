@@ -65,10 +65,17 @@ def _fomm_runtime_available() -> tuple[bool, str]:
     Returns:
         (ok, reason): ok=True if FOMM runtime is available, reason explains why not
     """
-    # Check external repo exists
+    # Check external repo exists - prefer wrapper, fallback to demo.py
+    fomm_wrapper = EXT_DEPS_DIR / "first-order-model" / "fomm_wrapper.py"
     fomm_demo_py = EXT_DEPS_DIR / "first-order-model" / "demo.py"
-    if not fomm_demo_py.exists():
-        return (False, f"Missing first-order-model repo at {fomm_demo_py}")
+
+    if not fomm_wrapper.exists() and not fomm_demo_py.exists():
+        return (False, f"Missing first-order-model repo at {EXT_DEPS_DIR / 'first-order-model'}")
+
+    # Check config directory exists (required for FOMM)
+    fomm_config_dir = EXT_DEPS_DIR / "first-order-model" / "config"
+    if not fomm_config_dir.exists():
+        return (False, f"Missing FOMM config directory at {fomm_config_dir}")
 
     # Check ffmpeg-python is installed (required by FOMM demo.py)
     if not _python_ffmpeg_available():
@@ -78,12 +85,13 @@ def _fomm_runtime_available() -> tuple[bool, str]:
     if not _ffmpeg_binary_available():
         return (False, "Missing system 'ffmpeg' binary (install via apt-get/brew/choco)")
 
-    # Try importing FOMM demo as smoke test
+    # Try importing FOMM wrapper as smoke test
     try:
         # We don't fully load it here (that happens in run_fomm), just check it's importable
-        spec = importlib.util.spec_from_file_location("_fomm_test", fomm_demo_py)
+        test_path = fomm_wrapper if fomm_wrapper.exists() else fomm_demo_py
+        spec = importlib.util.spec_from_file_location("_fomm_test", test_path)
         if spec is None or spec.loader is None:
-            return (False, f"Cannot create spec for {fomm_demo_py}")
+            return (False, f"Cannot create spec for {test_path}")
         return (True, "")
     except Exception as e:
         return (False, f"FOMM import test failed: {e}")
@@ -142,9 +150,14 @@ def run_fomm(face_img: str, audio_wav: str, ref_video: Optional[str], tmp_dir: P
 
     Returns: path to directory full of 0001.png, 0002.png, ...
     """
-    # Try to load FOMM module dynamically
+    # Try to load FOMM wrapper module dynamically
     try:
-        fomm_path = EXT_DEPS_DIR / "first-order-model" / "demo.py"
+        # Use fomm_wrapper.py which provides a main() function interface
+        fomm_path = EXT_DEPS_DIR / "first-order-model" / "fomm_wrapper.py"
+        if not fomm_path.exists():
+            # Fallback to trying demo.py directly (legacy support)
+            fomm_path = EXT_DEPS_DIR / "first-order-model" / "demo.py"
+
         fomm_demo = load_module_from_path("fomm_demo", fomm_path)
     except (ImportError, FileNotFoundError) as e:
         raise RuntimeError(
@@ -155,6 +168,9 @@ def run_fomm(face_img: str, audio_wav: str, ref_video: Optional[str], tmp_dir: P
     frames_dir = tmp_dir / "fomm_frames"
     frames_dir.mkdir(exist_ok=True)
 
+    # Detect CPU mode
+    cpu_mode = not torch.cuda.is_available()
+
     # Build CLI‑like args object
     class _Args:
         source_image = face_img
@@ -162,7 +178,10 @@ def run_fomm(face_img: str, audio_wav: str, ref_video: Optional[str], tmp_dir: P
         driving_video = ref_video
         result_dir = str(frames_dir)
         checkpoint = str(FOMM_CKPT)
-        # … other FOMM flags default inside demo.py
+        cpu = cpu_mode
+        relative = True
+        adapt_scale = True
+        # config will use default from wrapper if not specified
 
     if hasattr(fomm_demo, 'main'):
         fomm_demo.main(_Args())
