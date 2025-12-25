@@ -161,12 +161,23 @@ $RECYCLE.BIN/
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Model checkpoints (large files, downloaded separately)
-/models/
+#/models/
 !/models/.gitkeep
+/models/**
 
-# External Git dependencies
-/external_deps/
-!/external_deps/.gitkeep
+# External dependencies: INCLUDE them in repo, but exclude their internal git metadata
+# (We want to commit external_deps/* code, but not external_deps/**/.git)
+!external_deps/
+!external_deps/**
+
+# Ignore nested git repos inside vendored dependencies
+external_deps/**/.git/
+external_deps/**/.git
+
+# Optional: ignore upstream ignore files & git metadata files inside vendored deps
+external_deps/**/.gitignore
+external_deps/**/.gitmodules
+external_deps/**/.gitattributes
 
 # Temporary directories
 /tmp/
@@ -235,4 +246,12 @@ token.json
 *.avi
 *.mov
 *.mkv
-=*
+
+# (This line in your original was suspicious: "=*")
+# It can accidentally match odd filenames; removed intentionally.
+* copy *.*
+* copy*.*
+* copy 
+* copy * 
+
+*.pth
