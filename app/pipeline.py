@@ -275,161 +275,6 @@ MPI = _MPI()
 
 
 # --------------------------------------------------------------------------- #
-# ✅ NEW: Create a patcher script that patches torchvision.io at runtime
-# --------------------------------------------------------------------------- #
-
-def _create_torchvision_patcher(mock_root: Path) -> Path:
-    """
-    Create a patcher module that patches torchvision.io.write_video at runtime.
-    This gets imported before generate.py runs.
-    """
-    patcher_file = mock_root / "patch_torchvision.py"
-    
-    patcher_file.write_text(
-        """\
-\"\"\"
-Runtime patcher for torchvision.io.write_video to avoid PyAV dependency.
-This must be imported before torchvision.io is used.
-\"\"\"
-
-import os
-import subprocess
-import tempfile
-import shutil
-from pathlib import Path
-
-def patched_write_video(
-    filename,
-    video_array,
-    fps,
-    video_codec='libx264',
-    options=None,
-    audio_array=None,
-    audio_fps=None,
-    audio_codec='aac',
-    audio_options=None
-):
-    \"\"\"
-    Write video using ffmpeg instead of PyAV.
-    
-    Args:
-        filename: Output video path
-        video_array: torch.Tensor of shape (T, H, W, C) with values 0-255
-        fps: Video framerate
-        video_codec: Video codec (default: libx264)
-        options: Video encoding options (ignored)
-        audio_array: torch.Tensor of shape (C, N) audio samples
-        audio_fps: Audio sample rate
-        audio_codec: Audio codec (default: aac)
-        audio_options: Audio encoding options (ignored)
-    \"\"\"
-    import numpy as np
-    import torch
-    
-    # Convert tensors to numpy if needed
-    if isinstance(video_array, torch.Tensor):
-        video_array = video_array.cpu().numpy()
-    if audio_array is not None and isinstance(audio_array, torch.Tensor):
-        audio_array = audio_array.cpu().numpy()
-    
-    # Ensure uint8
-    if video_array.dtype != np.uint8:
-        video_array = video_array.astype(np.uint8)
-    
-    filename = str(filename)
-    temp_dir = tempfile.mkdtemp(prefix="tv_write_")
-    
-    try:
-        # Step 1: Write frames to temp directory
-        frames_dir = Path(temp_dir) / "frames"
-        frames_dir.mkdir(exist_ok=True)
-        
-        for i, frame in enumerate(video_array):
-            # frame is (H, W, C)
-            try:
-                from PIL import Image
-                img = Image.fromarray(frame)
-                img.save(frames_dir / f"{i:05d}.png")
-            except ImportError:
-                # Fallback to cv2 if PIL not available
-                import cv2
-                cv2.imwrite(str(frames_dir / f"{i:05d}.png"), cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
-        
-        # Step 2: Create video with ffmpeg
-        if audio_array is not None and audio_fps is not None:
-            # Write audio to temp WAV file
-            audio_path = Path(temp_dir) / "audio.wav"
-            
-            # audio_array is (C, N), we need (N,) or (N, C) for wavfile
-            if audio_array.ndim == 2:
-                audio_data = audio_array.T
-            else:
-                audio_data = audio_array
-            
-            # Ensure proper format for WAV
-            if audio_data.dtype in (np.float32, np.float64):
-                audio_data = (audio_data * 32767).astype(np.int16)
-            
-            try:
-                import scipy.io.wavfile as wavfile
-                wavfile.write(str(audio_path), int(audio_fps), audio_data)
-            except ImportError:
-                # Fallback: use ffmpeg to create audio from raw PCM
-                print("[patch] scipy not available, using ffmpeg for audio encoding")
-                raw_audio = Path(temp_dir) / "audio.raw"
-                audio_data.tofile(str(raw_audio))
-                subprocess.check_call([
-                    "ffmpeg", "-y", "-loglevel", "error",
-                    "-f", "s16le",
-                    "-ar", str(int(audio_fps)),
-                    "-ac", str(audio_array.shape[0] if audio_array.ndim == 2 else 1),
-                    "-i", str(raw_audio),
-                    str(audio_path)
-                ])
-            
-            # Combine video and audio
-            cmd = [
-                "ffmpeg", "-y", "-loglevel", "error",
-                "-r", str(fps),
-                "-i", str(frames_dir / "%05d.png"),
-                "-i", str(audio_path),
-                "-c:v", video_codec,
-                "-pix_fmt", "yuv420p",
-                "-c:a", audio_codec,
-                "-b:a", "192k",
-                "-shortest",
-                filename
-            ]
-        else:
-            # Video only
-            cmd = [
-                "ffmpeg", "-y", "-loglevel", "error",
-                "-r", str(fps),
-                "-i", str(frames_dir / "%05d.png"),
-                "-c:v", video_codec,
-                "-pix_fmt", "yuv420p",
-                filename
-            ]
-        
-        subprocess.check_call(cmd)
-        
-    finally:
-        # Cleanup temp directory
-        shutil.rmtree(temp_dir, ignore_errors=True)
-
-
-# Apply the patch
-import torchvision.io
-torchvision.io.write_video = patched_write_video
-print("[patch] Successfully patched torchvision.io.write_video to use ffmpeg instead of PyAV")
-""",
-        encoding="utf-8",
-    )
-    
-    return patcher_file
-
-
-# --------------------------------------------------------------------------- #
 # Stage 1: FOMM
 # --------------------------------------------------------------------------- #
 
@@ -532,6 +377,11 @@ def _diff2lip_flags_for_checkpoint(ckpt: Path) -> Tuple[List[str], List[str], Li
 def run_diff2lip(frames_dir: Path, audio_in: str, tmp_dir: Path) -> Path:
     """
     Run Diff2Lip generate.py as subprocess.
+    Returns: output_video_path
+    
+    Note: Diff2Lip internally uses 16kHz mono audio for inference,
+    but we don't return that audio - the caller should use the original
+    high-quality audio for final output.
     """
     gen = _diff2lip_script()
     if not gen.exists():
@@ -544,32 +394,27 @@ def run_diff2lip(frames_dir: Path, audio_in: str, tmp_dir: Path) -> Path:
     d2l_input_mp4 = tmp_dir / "d2l_input.mp4"
     _make_silent_video_from_frames(frames_dir, d2l_input_mp4, fps=25)
 
-    # Convert audio to 16k mono
+    # Convert audio to 16k mono for Diff2Lip inference
+    # This is only used internally by Diff2Lip for lip-sync
     audio_16k = tmp_dir / "audio_16k_mono.wav"
     _audio_to_16k_mono(audio_in, str(audio_16k))
 
-    # ✅ Inject mpi4py mock AND torchvision patcher BEFORE Diff2Lip imports happen
+    # ✅ Inject mpi4py mock BEFORE Diff2Lip imports happen
     mock_root = tmp_dir / "mock_libs"
     _ensure_dir(mock_root)
     _create_mpi4py_mock(mock_root)
-    patcher_file = _create_torchvision_patcher(mock_root)
 
     # Ensure Diff2Lip can import its guided_diffusion (the one inside Diff2Lip repo)
     env = os.environ.copy()
     d2l_root = (EXT_DEPS_DIR / "Diff2Lip").resolve()
     guided_root = (EXT_DEPS_DIR / "Diff2Lip" / "guided-diffusion").resolve()
 
-    # ✅ CRITICAL: Put mock_root FIRST in PYTHONPATH so our mocks take precedence
     env["PYTHONPATH"] = (
         f"{str(mock_root.resolve())}{os.pathsep}"
         f"{str(d2l_root)}{os.pathsep}"
         f"{str(guided_root)}{os.pathsep}"
         f"{env.get('PYTHONPATH', '')}"
     )
-
-    # ✅ Use PYTHONSTARTUP or -c to import patcher before running generate.py
-    # We'll use python -c to import the patcher then exec the script
-    startup_code = f"import sys; sys.path.insert(0, '{str(mock_root.resolve())}'); import patch_torchvision"
 
     # (Optional) avoid some MPI init assumptions
     env.setdefault("MASTER_ADDR", "127.0.0.1")
@@ -599,22 +444,21 @@ def run_diff2lip(frames_dir: Path, audio_in: str, tmp_dir: Path) -> Path:
             "--is_voxceleb2", "False",
         ]
 
-        # ✅ Run python with -c to import patcher, then exec the generate.py script
         all_args = model_flags + diffusion_flags + sample_flags + data_flags + tfg_flags + gen_flags
-        args_str = " ".join(f'"{arg}"' if " " in arg else arg for arg in all_args)
         
-        exec_code = f"{startup_code}; import sys; sys.argv = ['{str(gen)}'] + {repr(model_flags + diffusion_flags + sample_flags + data_flags + tfg_flags + gen_flags)}; exec(open('{str(gen)}').read())"
-        
-        cmd = [sys.executable, "-c", exec_code]
+        # Simple subprocess call - PyAV should be installed
+        cmd = [sys.executable, str(gen)] + all_args
         
         print(f"[pipeline] Diff2Lip trying ckpt: {ckpt.name}")
-        print(f"[pipeline] Diff2Lip running with torchvision.io patch")
+        print(f"[pipeline] Diff2Lip running: {' '.join(cmd)}")
 
         if out_mp4.exists():
             out_mp4.unlink()
 
         code, tail = _run_cmd_capture_tail(cmd, env=env, tail_lines=60)
         if code == 0 and out_mp4.exists() and out_mp4.stat().st_size > 0:
+            # ✅ Return just the video - caller uses original audio
+            print(f"[pipeline] Diff2Lip succeeded with {ckpt.name}")
             return out_mp4
 
         last_tail = tail
@@ -773,6 +617,10 @@ def render_pipeline(
 ) -> str:
     """
     FOMM -> (Diff2Lip or Wav2Lip) -> optional GFPGAN -> final mp4 with guaranteed audio
+    
+    Audio handling:
+    - Diff2Lip uses 16kHz mono internally for lip-sync inference
+    - Final output uses the ORIGINAL high-quality audio for best quality
     """
     tmp = Path(tempfile.mkdtemp(prefix="vidgen_"))
 
@@ -783,13 +631,19 @@ def render_pipeline(
 
     fomm_frames = run_fomm(face_image, audio, reference_video, tmp)
 
+    # ✅ ALWAYS use original high-quality audio for final output
+    final_audio = audio
+    
     lip_result: Path
     want_d2l = (quality_mode in ("high_quality", "auto")) and torch.cuda.is_available()
     d2l_available = _diff2lip_script().exists() and (D2L_PAPER_CKPT.exists() or D2L_LEGACY_CKPT.exists())
 
     if want_d2l and d2l_available:
         try:
+            # Diff2Lip uses 16kHz mono internally, but we don't use that for final output
             lip_result = run_diff2lip(fomm_frames, audio, tmp)
+            # ✅ DON'T overwrite final_audio - keep using original
+            print(f"[pipeline] Using original audio for final output (not 16kHz version)")
         except Exception as e:
             print(f"[pipeline] Diff2Lip failed: {e}. Falling back to Wav2Lip.")
             lip_result = run_wav2lip(fomm_frames, audio, tmp)
@@ -805,18 +659,24 @@ def render_pipeline(
     out_path_p.parent.mkdir(parents=True, exist_ok=True)
 
     if final_result.is_file() and final_result.suffix.lower() == ".mp4":
+        # Video file - remux with original high-quality audio
         tmp_remux = tmp / "remux.mp4"
-        _remux_video_with_audio(final_result, Path(audio), tmp_remux)
+        print(f"[pipeline] Remuxing video with original audio: {final_audio}")
+        _remux_video_with_audio(final_result, Path(final_audio), tmp_remux)
         shutil.copy(str(tmp_remux), out_path_abs)
     else:
+        # Directory of frames - encode with original high-quality audio
         tmp_encoded = tmp / "encoded.mp4"
-        encode_mp4(final_result, audio, str(tmp_encoded), fps=25)
+        print(f"[pipeline] Encoding frames with original audio: {final_audio}")
+        encode_mp4(final_result, final_audio, str(tmp_encoded), fps=25)
 
         tmp_remux = tmp / "remux.mp4"
-        _remux_video_with_audio(tmp_encoded, Path(audio), tmp_remux)
+        _remux_video_with_audio(tmp_encoded, Path(final_audio), tmp_remux)
         shutil.copy(str(tmp_remux), out_path_abs)
 
     if not _verify_has_audio(Path(out_path_abs)):
         print("[pipeline] ⚠️ WARNING: final output seems to have no audio stream after remux.")
+    else:
+        print("[pipeline] ✅ Audio stream verified in final output")
 
     return out_path_abs
