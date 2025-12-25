@@ -1,14 +1,14 @@
 """
-app/pipeline.py – FOMM + Diff2Lip (+ GFPGAN + Wav2Lip fallback)
+pipeline.py – FOMM + Diff2Lip (+ Wav2Lip fallback) + optional GFPGAN
 
 Input:
-    face_image       – path to PNG/JPG portrait (one face, frontish)
-    audio            – path to WAV (we normalize to 16kHz mono)
-    reference_video  – optional short driver MP4 (for motion)
+    face_image       – path to PNG/JPG portrait
+    audio            – path to WAV (ideally 16kHz mono; but ffmpeg will decode other)
+    reference_video  – optional driver MP4
     out_path         – target MP4 file
 
 Returns:
-    Absolute path to the finished MP4 (with audio).
+    Absolute path to the finished MP4.
 """
 
 from __future__ import annotations
@@ -21,17 +21,16 @@ import sys
 import tempfile
 import glob
 from pathlib import Path
-from typing import Optional, Any
+from typing import Optional, Any, Tuple, List
 
-import cv2
 import torch
 
 # --------------------------------------------------------------------------- #
-# HOTFIX: Monkeypatch torchvision for GFPGAN/BasicSR compatibility
+# Torchvision monkeypatch for BasicSR/GFPGAN compatibility (safe no-op if not needed)
 # --------------------------------------------------------------------------- #
 try:
     from torchvision.transforms import functional_tensor  # noqa: F401
-except ImportError:
+except Exception:
     try:
         import torchvision.transforms.functional as functional  # noqa: F401
         sys.modules["torchvision.transforms.functional_tensor"] = functional
@@ -45,21 +44,25 @@ except ImportError:
 def _resolve_model_root() -> Path:
     env = os.environ.get("MODEL_ROOT")
     if env:
-        return Path(env).resolve()
+        return Path(env)
     cwd = Path.cwd()
-    if (cwd / "pyproject.toml").exists() or (cwd / "Makefile").exists():
-        return (cwd / "models").resolve()
-    return Path("/models").resolve()
+    if (cwd / "pyproject.toml").exists() or (cwd / "Makefile").exists() or (cwd / "app").exists():
+        return cwd / "models"
+    return Path("/models")
 
 
 MODEL_ROOT = _resolve_model_root()
 
-FOMM_CKPT   = MODEL_ROOT / "fomm" / "vox-cpk.pth"
-D2L_CKPT    = MODEL_ROOT / "diff2lip" / "Diff2Lip.pth"
-W2L_CKPT    = MODEL_ROOT / "wav2lip" / "wav2lip_gan.pth"
+FOMM_CKPT = MODEL_ROOT / "fomm" / "vox-cpk.pth"
+
+# Diff2Lip: support BOTH checkpoints (paper + legacy)
+D2L_PAPER_CKPT = MODEL_ROOT / "diff2lip" / "e7.24.1.3_model260000_paper.pt"
+D2L_LEGACY_CKPT = MODEL_ROOT / "diff2lip" / "Diff2Lip.pth"
+
+W2L_CKPT = MODEL_ROOT / "wav2lip" / "wav2lip_gan.pth"
 GFPGAN_CKPT = MODEL_ROOT / "gfpgan" / "GFPGANv1.3.pth"
 
-EXT_DEPS_DIR = Path(os.environ.get("EXT_DEPS_DIR", "external_deps")).resolve()
+EXT_DEPS_DIR = Path(os.environ.get("EXT_DEPS_DIR", "external_deps"))
 
 # --------------------------------------------------------------------------- #
 # Helpers
@@ -74,7 +77,10 @@ def _ffprobe_binary_available() -> bool:
 
 
 def load_module_from_path(module_name: str, file_path: Path) -> Any:
-    """Dynamically load a Python module from a file path."""
+    """
+    Dynamically load a Python module from a file path.
+    Injects the parent directory to sys.path so internal imports work.
+    """
     if not file_path.exists():
         raise ImportError(f"Module file not found: {file_path}")
 
@@ -95,133 +101,50 @@ def load_module_from_path(module_name: str, file_path: Path) -> Any:
     return module
 
 
-def _create_mpi_mock(target_dir: Path) -> Path:
+def _run_cmd_capture_tail(cmd: List[str], env: Optional[dict] = None, tail_lines: int = 30) -> Tuple[int, str]:
     """
-    Create a *package-style* mpi4py mock that satisfies Diff2Lip guided_diffusion/dist_util.py.
-
-    dist_util expects:
-      from mpi4py import MPI
-      comm = MPI.COMM_WORLD
-      comm.bcast(...)
-      comm.rank / comm.size
-      comm.Barrier()
-      (sometimes Get_rank/Get_size too)
-
-    We provide a minimal single-process communicator.
+    Run subprocess, capture combined stdout/stderr, return (returncode, tail_text).
     """
-    target_dir = target_dir.resolve()
-    pkg_dir = target_dir / "mpi4py"
-    pkg_dir.mkdir(parents=True, exist_ok=True)
-
-    init_py = pkg_dir / "__init__.py"
-    if not init_py.exists():
-        init_py.write_text(
-            r"""
-# Minimal mpi4py mock for single-process inference
-class _CommWorld:
-    def __init__(self):
-        self.rank = 0
-        self.size = 1
-
-    def Get_rank(self):
-        return 0
-
-    def Get_size(self):
-        return 1
-
-    def bcast(self, obj, root=0):
-        return obj
-
-    def Barrier(self):
-        return None
-
-class _MPI:
-    COMM_WORLD = _CommWorld()
-
-    @staticmethod
-    def Get_processor_name():
-        return "localhost"
-
-MPI = _MPI()
-""".lstrip()
-        )
-
-    return target_dir
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        env=env,
+    )
+    assert proc.stdout is not None
+    lines: List[str] = []
+    for line in proc.stdout:
+        lines.append(line.rstrip("\n"))
+        if len(lines) > 5000:
+            lines = lines[-2500:]
+    proc.wait()
+    tail = "\n".join(lines[-tail_lines:])
+    return proc.returncode, tail
 
 
-def _ensure_audio_is_decodable(audio_path: str, tmp_dir: Path) -> str:
+def _ensure_dir(p: Path) -> None:
+    p.mkdir(parents=True, exist_ok=True)
+
+
+def _audio_to_16k_mono(in_audio: str, out_wav: str) -> None:
     """
-    Normalize audio for downstream tools:
-      - WAV
-      - mono
-      - 16kHz
+    Some pipelines behave better with 16k mono WAV.
     """
-    in_path = Path(audio_path)
-    if not in_path.exists():
-        raise FileNotFoundError(f"Audio not found: {audio_path}")
-
-    if not _ffmpeg_binary_available():
-        return str(in_path)
-
-    fixed = tmp_dir / "audio_16k_mono.wav"
     cmd = [
         "ffmpeg", "-y", "-loglevel", "error",
-        "-i", str(in_path),
+        "-i", in_audio,
         "-ac", "1",
         "-ar", "16000",
-        str(fixed),
+        out_wav,
     ]
     subprocess.check_call(cmd)
-    return str(fixed)
 
 
-def _video_has_audio(video_path: Path) -> bool:
-    if not _ffprobe_binary_available():
-        return False
-    try:
-        out = subprocess.check_output(
-            [
-                "ffprobe", "-v", "error",
-                "-select_streams", "a",
-                "-show_entries", "stream=codec_type",
-                "-of", "default=noprint_wrappers=1:nokey=1",
-                str(video_path),
-            ],
-            text=True,
-        ).strip()
-        return "audio" in out.splitlines()
-    except Exception:
-        return False
-
-
-def _mux_audio_into_video(video_path: Path, audio_wav: str, out_path: Path) -> Path:
-    """Force mux audio into an existing MP4 (used when an output is silent)."""
-    if not _ffmpeg_binary_available():
-        raise RuntimeError("ffmpeg not found")
-
+def _make_silent_video_from_frames(frames_dir: Path, out_mp4: Path, fps: int = 25) -> None:
     cmd = [
-        "ffmpeg", "-y", "-loglevel", "warning",
-        "-i", str(video_path),
-        "-i", str(audio_wav),
-        "-map", "0:v:0",
-        "-map", "1:a:0",
-        "-c:v", "copy",
-        "-c:a", "aac",
-        "-b:a", "128k",
-        "-shortest",
-        str(out_path),
-    ]
-    subprocess.check_call(cmd)
-    return out_path
-
-
-def _make_silent_video(frames_dir: Path, out_mp4: Path, fps: int = 25):
-    """Create a silent MP4 from an image sequence (for tools that require video input)."""
-    if not _ffmpeg_binary_available():
-        raise RuntimeError("ffmpeg not found")
-
-    cmd = [
-        "ffmpeg", "-y", "-loglevel", "error",
+        "ffmpeg", "-y",
+        "-loglevel", "error",
         "-r", str(fps),
         "-i", str(frames_dir / "%04d.png"),
         "-an",
@@ -231,22 +154,300 @@ def _make_silent_video(frames_dir: Path, out_mp4: Path, fps: int = 25):
     ]
     subprocess.check_call(cmd)
 
+
+def _remux_video_with_audio(video_in: Path, audio_in: Path, out_mp4: Path) -> None:
+    """
+    ALWAYS remux final output to guarantee audio exists.
+    Keeps video stream as-is and encodes audio to AAC.
+    """
+    cmd = [
+        "ffmpeg", "-y", "-loglevel", "warning",
+        "-i", str(video_in),
+        "-i", str(audio_in),
+        "-map", "0:v:0",
+        "-map", "1:a:0",
+        "-c:v", "copy",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-shortest",
+        "-movflags", "+faststart",
+        str(out_mp4),
+    ]
+    subprocess.check_call(cmd)
+
+
+def _verify_has_audio(path: Path) -> bool:
+    if not _ffprobe_binary_available():
+        return True
+    try:
+        out = subprocess.check_output(
+            [
+                "ffprobe", "-v", "error",
+                "-show_entries", "stream=codec_type",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                str(path),
+            ],
+            text=True,
+        )
+        streams = [s.strip() for s in out.splitlines() if s.strip()]
+        return "audio" in streams
+    except Exception:
+        return True
+
+
 # --------------------------------------------------------------------------- #
-# Pipeline stages
+# ✅ FIX: Robust mpi4py mock (package) with COMM_WORLD.bcast and friends
+# --------------------------------------------------------------------------- #
+
+def _create_mpi4py_mock(mock_root: Path) -> None:
+    """
+    Create a minimal mpi4py package that satisfies guided-diffusion's dist_util.py.
+
+    guided_diffusion/dist_util.py expects:
+      from mpi4py import MPI
+      comm = MPI.COMM_WORLD
+      comm.Get_rank(), comm.Get_size(), comm.bcast(), comm.Barrier(), etc.
+      AND comm.rank, comm.size as properties
+    """
+    pkg = mock_root / "mpi4py"
+    _ensure_dir(pkg)
+
+    init_py = pkg / "__init__.py"
+
+    # Minimal but compatible API surface
+    init_py.write_text(
+        """\
+# Auto-generated mpi4py mock for single-process inference
+# This is only meant to satisfy guided-diffusion / Diff2Lip imports.
+
+class _Op:
+    pass
+
+class _Comm:
+    # Properties (used by dist_util.py)
+    @property
+    def rank(self):
+        return 0
+    
+    @property
+    def size(self):
+        return 1
+    
+    # Methods (also part of MPI API)
+    def Get_rank(self):
+        return 0
+
+    def Get_size(self):
+        return 1
+
+    def bcast(self, obj, root=0):
+        # Single process: broadcast is identity
+        return obj
+
+    def Barrier(self):
+        return None
+
+    def allreduce(self, obj, op=None):
+        # Single process: reduce is identity
+        return obj
+
+    def gather(self, obj, root=0):
+        return [obj]
+
+    def scatter(self, obj, root=0):
+        if isinstance(obj, (list, tuple)) and obj:
+            return obj[0]
+        return obj
+
+    def Abort(self, code=1):
+        raise SystemExit(code)
+
+class _MPI:
+    COMM_WORLD = _Comm()
+    SUM = _Op()
+    MAX = _Op()
+    MIN = _Op()
+
+MPI = _MPI()
+""",
+        encoding="utf-8",
+    )
+
+
+# --------------------------------------------------------------------------- #
+# ✅ NEW: Create a patcher script that patches torchvision.io at runtime
+# --------------------------------------------------------------------------- #
+
+def _create_torchvision_patcher(mock_root: Path) -> Path:
+    """
+    Create a patcher module that patches torchvision.io.write_video at runtime.
+    This gets imported before generate.py runs.
+    """
+    patcher_file = mock_root / "patch_torchvision.py"
+    
+    patcher_file.write_text(
+        """\
+\"\"\"
+Runtime patcher for torchvision.io.write_video to avoid PyAV dependency.
+This must be imported before torchvision.io is used.
+\"\"\"
+
+import os
+import subprocess
+import tempfile
+import shutil
+from pathlib import Path
+
+def patched_write_video(
+    filename,
+    video_array,
+    fps,
+    video_codec='libx264',
+    options=None,
+    audio_array=None,
+    audio_fps=None,
+    audio_codec='aac',
+    audio_options=None
+):
+    \"\"\"
+    Write video using ffmpeg instead of PyAV.
+    
+    Args:
+        filename: Output video path
+        video_array: torch.Tensor of shape (T, H, W, C) with values 0-255
+        fps: Video framerate
+        video_codec: Video codec (default: libx264)
+        options: Video encoding options (ignored)
+        audio_array: torch.Tensor of shape (C, N) audio samples
+        audio_fps: Audio sample rate
+        audio_codec: Audio codec (default: aac)
+        audio_options: Audio encoding options (ignored)
+    \"\"\"
+    import numpy as np
+    import torch
+    
+    # Convert tensors to numpy if needed
+    if isinstance(video_array, torch.Tensor):
+        video_array = video_array.cpu().numpy()
+    if audio_array is not None and isinstance(audio_array, torch.Tensor):
+        audio_array = audio_array.cpu().numpy()
+    
+    # Ensure uint8
+    if video_array.dtype != np.uint8:
+        video_array = video_array.astype(np.uint8)
+    
+    filename = str(filename)
+    temp_dir = tempfile.mkdtemp(prefix="tv_write_")
+    
+    try:
+        # Step 1: Write frames to temp directory
+        frames_dir = Path(temp_dir) / "frames"
+        frames_dir.mkdir(exist_ok=True)
+        
+        for i, frame in enumerate(video_array):
+            # frame is (H, W, C)
+            try:
+                from PIL import Image
+                img = Image.fromarray(frame)
+                img.save(frames_dir / f"{i:05d}.png")
+            except ImportError:
+                # Fallback to cv2 if PIL not available
+                import cv2
+                cv2.imwrite(str(frames_dir / f"{i:05d}.png"), cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+        
+        # Step 2: Create video with ffmpeg
+        if audio_array is not None and audio_fps is not None:
+            # Write audio to temp WAV file
+            audio_path = Path(temp_dir) / "audio.wav"
+            
+            # audio_array is (C, N), we need (N,) or (N, C) for wavfile
+            if audio_array.ndim == 2:
+                audio_data = audio_array.T
+            else:
+                audio_data = audio_array
+            
+            # Ensure proper format for WAV
+            if audio_data.dtype in (np.float32, np.float64):
+                audio_data = (audio_data * 32767).astype(np.int16)
+            
+            try:
+                import scipy.io.wavfile as wavfile
+                wavfile.write(str(audio_path), int(audio_fps), audio_data)
+            except ImportError:
+                # Fallback: use ffmpeg to create audio from raw PCM
+                print("[patch] scipy not available, using ffmpeg for audio encoding")
+                raw_audio = Path(temp_dir) / "audio.raw"
+                audio_data.tofile(str(raw_audio))
+                subprocess.check_call([
+                    "ffmpeg", "-y", "-loglevel", "error",
+                    "-f", "s16le",
+                    "-ar", str(int(audio_fps)),
+                    "-ac", str(audio_array.shape[0] if audio_array.ndim == 2 else 1),
+                    "-i", str(raw_audio),
+                    str(audio_path)
+                ])
+            
+            # Combine video and audio
+            cmd = [
+                "ffmpeg", "-y", "-loglevel", "error",
+                "-r", str(fps),
+                "-i", str(frames_dir / "%05d.png"),
+                "-i", str(audio_path),
+                "-c:v", video_codec,
+                "-pix_fmt", "yuv420p",
+                "-c:a", audio_codec,
+                "-b:a", "192k",
+                "-shortest",
+                filename
+            ]
+        else:
+            # Video only
+            cmd = [
+                "ffmpeg", "-y", "-loglevel", "error",
+                "-r", str(fps),
+                "-i", str(frames_dir / "%05d.png"),
+                "-c:v", video_codec,
+                "-pix_fmt", "yuv420p",
+                filename
+            ]
+        
+        subprocess.check_call(cmd)
+        
+    finally:
+        # Cleanup temp directory
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+# Apply the patch
+import torchvision.io
+torchvision.io.write_video = patched_write_video
+print("[patch] Successfully patched torchvision.io.write_video to use ffmpeg instead of PyAV")
+""",
+        encoding="utf-8",
+    )
+    
+    return patcher_file
+
+
+# --------------------------------------------------------------------------- #
+# Stage 1: FOMM
 # --------------------------------------------------------------------------- #
 
 def run_fomm(face_img: str, audio_wav: str, ref_video: Optional[str], tmp_dir: Path) -> Path:
-    """Run First Order Motion Model to animate the face -> returns frames directory."""
-    fomm_path = EXT_DEPS_DIR / "first-order-model" / "fomm_wrapper.py"
+    """
+    Run First Order Motion Model to animate the face.
+    Produces frames %04d.png in frames_dir.
+    """
+    fomm_wrapper = EXT_DEPS_DIR / "first-order-model" / "fomm_wrapper.py"
+    fomm_demo_py = EXT_DEPS_DIR / "first-order-model" / "demo.py"
+    fomm_path = fomm_wrapper if fomm_wrapper.exists() else fomm_demo_py
     if not fomm_path.exists():
-        fomm_path = EXT_DEPS_DIR / "first-order-model" / "demo.py"
-    if not fomm_path.exists():
-        raise RuntimeError(f"FOMM entry not found under {EXT_DEPS_DIR / 'first-order-model'}")
+        raise RuntimeError(f"FOMM not found at {EXT_DEPS_DIR / 'first-order-model'}")
 
     fomm_demo = load_module_from_path("fomm_demo", fomm_path)
 
     frames_dir = tmp_dir / "fomm_frames"
-    frames_dir.mkdir(exist_ok=True)
+    _ensure_dir(frames_dir)
 
     class _Args:
         source_image = face_img
@@ -259,26 +460,190 @@ def run_fomm(face_img: str, audio_wav: str, ref_video: Optional[str], tmp_dir: P
         adapt_scale = True
 
     if not hasattr(fomm_demo, "main"):
-        raise RuntimeError("FOMM 'main' function not found")
+        raise RuntimeError("FOMM module loaded but 'main' function not found")
 
     fomm_demo.main(_Args())
     return frames_dir
 
 
+# --------------------------------------------------------------------------- #
+# Stage 2: Diff2Lip (subprocess) with BOTH checkpoint styles
+# --------------------------------------------------------------------------- #
+
+def _diff2lip_script() -> Path:
+    return EXT_DEPS_DIR / "Diff2Lip" / "generate.py"
+
+
+def _pick_diff2lip_ckpts() -> List[Path]:
+    ckpts: List[Path] = []
+    if D2L_PAPER_CKPT.exists():
+        ckpts.append(D2L_PAPER_CKPT)
+    if D2L_LEGACY_CKPT.exists():
+        ckpts.append(D2L_LEGACY_CKPT)
+    return ckpts
+
+
+def _diff2lip_flags_for_checkpoint(ckpt: Path) -> Tuple[List[str], List[str], List[str], List[str], List[str]]:
+    """
+    Best-effort flags matching the "paper" model.
+    Your fingerprint shows both models look identical (same tensor shapes),
+    so we can use the same flags for both.
+    """
+    model_flags = [
+        "--attention_resolutions", "32,16,8",
+        "--class_cond", "False",
+        "--learn_sigma", "True",
+        "--num_channels", "128",
+        "--num_head_channels", "64",
+        "--num_res_blocks", "2",
+        "--resblock_updown", "True",
+        "--use_fp16", "True",
+        "--use_scale_shift_norm", "False",
+    ]
+    diffusion_flags = [
+        "--predict_xstart", "False",
+        "--diffusion_steps", "1000",
+        "--noise_schedule", "linear",
+        "--rescale_timesteps", "False",
+    ]
+    sample_flags = [
+        "--sampling_seed", "7",
+        "--sampling_input_type", "gt",
+        "--sampling_ref_type", "gt",
+        "--timestep_respacing", "ddim25",
+        "--use_ddim", "True",
+        f"--model_path={str(ckpt)}",
+    ]
+    data_flags = [
+        "--nframes", "5",
+        "--nrefer", "1",
+        "--image_size", "128",
+        "--sampling_batch_size", "16",
+    ]
+    tfg_flags = [
+        "--face_hide_percentage", "0.5",
+        "--use_ref", "True",
+        "--use_audio", "True",
+        "--audio_as_style", "True",
+    ]
+    return model_flags, diffusion_flags, sample_flags, data_flags, tfg_flags
+
+
+def run_diff2lip(frames_dir: Path, audio_in: str, tmp_dir: Path) -> Path:
+    """
+    Run Diff2Lip generate.py as subprocess.
+    """
+    gen = _diff2lip_script()
+    if not gen.exists():
+        raise RuntimeError(f"Diff2Lip generate.py not found at: {gen}")
+
+    if not _ffmpeg_binary_available():
+        raise RuntimeError("ffmpeg not found; Diff2Lip requires ffmpeg")
+
+    # Convert frames -> mp4
+    d2l_input_mp4 = tmp_dir / "d2l_input.mp4"
+    _make_silent_video_from_frames(frames_dir, d2l_input_mp4, fps=25)
+
+    # Convert audio to 16k mono
+    audio_16k = tmp_dir / "audio_16k_mono.wav"
+    _audio_to_16k_mono(audio_in, str(audio_16k))
+
+    # ✅ Inject mpi4py mock AND torchvision patcher BEFORE Diff2Lip imports happen
+    mock_root = tmp_dir / "mock_libs"
+    _ensure_dir(mock_root)
+    _create_mpi4py_mock(mock_root)
+    patcher_file = _create_torchvision_patcher(mock_root)
+
+    # Ensure Diff2Lip can import its guided_diffusion (the one inside Diff2Lip repo)
+    env = os.environ.copy()
+    d2l_root = (EXT_DEPS_DIR / "Diff2Lip").resolve()
+    guided_root = (EXT_DEPS_DIR / "Diff2Lip" / "guided-diffusion").resolve()
+
+    # ✅ CRITICAL: Put mock_root FIRST in PYTHONPATH so our mocks take precedence
+    env["PYTHONPATH"] = (
+        f"{str(mock_root.resolve())}{os.pathsep}"
+        f"{str(d2l_root)}{os.pathsep}"
+        f"{str(guided_root)}{os.pathsep}"
+        f"{env.get('PYTHONPATH', '')}"
+    )
+
+    # ✅ Use PYTHONSTARTUP or -c to import patcher before running generate.py
+    # We'll use python -c to import the patcher then exec the script
+    startup_code = f"import sys; sys.path.insert(0, '{str(mock_root.resolve())}'); import patch_torchvision"
+
+    # (Optional) avoid some MPI init assumptions
+    env.setdefault("MASTER_ADDR", "127.0.0.1")
+    env.setdefault("MASTER_PORT", "29500")
+
+    out_dir = tmp_dir / "d2l_out"
+    _ensure_dir(out_dir)
+    out_mp4 = out_dir / "result.mp4"
+
+    ckpts = _pick_diff2lip_ckpts()
+    if not ckpts:
+        raise RuntimeError("No Diff2Lip checkpoints found. Put one in models/diff2lip/")
+
+    last_tail = ""
+    for ckpt in ckpts:
+        model_flags, diffusion_flags, sample_flags, data_flags, tfg_flags = _diff2lip_flags_for_checkpoint(ckpt)
+
+        gen_flags = [
+            "--generate_from_filelist", "0",
+            "--video_path", str(d2l_input_mp4),
+            "--audio_path", str(audio_16k),
+            "--out_path", str(out_mp4),
+            "--sample_path", str(out_dir),
+            "--save_orig", "False",
+            "--face_det_batch_size", "16",
+            "--pads", "0,0,0,0",
+            "--is_voxceleb2", "False",
+        ]
+
+        # ✅ Run python with -c to import patcher, then exec the generate.py script
+        all_args = model_flags + diffusion_flags + sample_flags + data_flags + tfg_flags + gen_flags
+        args_str = " ".join(f'"{arg}"' if " " in arg else arg for arg in all_args)
+        
+        exec_code = f"{startup_code}; import sys; sys.argv = ['{str(gen)}'] + {repr(model_flags + diffusion_flags + sample_flags + data_flags + tfg_flags + gen_flags)}; exec(open('{str(gen)}').read())"
+        
+        cmd = [sys.executable, "-c", exec_code]
+        
+        print(f"[pipeline] Diff2Lip trying ckpt: {ckpt.name}")
+        print(f"[pipeline] Diff2Lip running with torchvision.io patch")
+
+        if out_mp4.exists():
+            out_mp4.unlink()
+
+        code, tail = _run_cmd_capture_tail(cmd, env=env, tail_lines=60)
+        if code == 0 and out_mp4.exists() and out_mp4.stat().st_size > 0:
+            return out_mp4
+
+        last_tail = tail
+        print("[pipeline] Diff2Lip failed output (tail):")
+        print(last_tail)
+
+    raise RuntimeError(f"Diff2Lip failed for all checkpoints. Last tail:\n{last_tail}")
+
+
+# --------------------------------------------------------------------------- #
+# Stage 3: Wav2Lip fallback
+# --------------------------------------------------------------------------- #
+
 def run_wav2lip(frames_dir: Path, audio_wav: str, tmp_dir: Path) -> Path:
-    """Run Wav2Lip fallback. Returns a video path if successful, else frames_dir."""
     wav2lip_dir = EXT_DEPS_DIR / "Wav2Lip"
     script = wav2lip_dir / "inference.py"
     if not script.exists():
-        print("[pipeline] Wav2Lip missing.")
+        print("[pipeline] Wav2Lip missing; returning frames without lip-sync.")
+        return frames_dir
+
+    if not _ffmpeg_binary_available():
+        print("[pipeline] ffmpeg not available; returning frames without lip-sync.")
         return frames_dir
 
     silent_vid = tmp_dir / "wav2lip_input.mp4"
     out_vid = tmp_dir / "wav2lip_out.mp4"
 
-    _make_silent_video(frames_dir, silent_vid)
+    _make_silent_video_from_frames(frames_dir, silent_vid, fps=25)
 
-    # Some forks hardcode temp/result.avi
     os.makedirs("temp", exist_ok=True)
 
     env = os.environ.copy()
@@ -297,164 +662,77 @@ def run_wav2lip(frames_dir: Path, audio_wav: str, tmp_dir: Path) -> Path:
         subprocess.check_call(cmd, env=env)
         if out_vid.exists() and out_vid.stat().st_size > 0:
             return out_vid
+        print("[pipeline] Wav2Lip finished but output missing/empty; returning frames.")
+        return frames_dir
     except Exception as e:
         print(f"[pipeline] Wav2Lip failed: {e}")
-
-    return frames_dir
-
-
-def run_diff2lip(frames_dir: Path, audio_wav: str, tmp_dir: Path) -> Path:
-    """
-    Run Diff2Lip (HQ) for the zip version you posted.
-
-    Critical fixes:
-      - Use Diff2Lip's generate.py CLI (--video_path/--audio_path/--out_path/--model_path)
-      - Force Diff2Lip bundled guided-diffusion first in PYTHONPATH
-      - Provide a real-ish mpi4py mock (COMM_WORLD.rank/size + bcast)
-      - Set single-process dist env vars to keep torch.distributed happy
-      - Use cwd=Diff2Lip root so relative paths resolve
-    """
-    d2l_root = (EXT_DEPS_DIR / "Diff2Lip").resolve()
-    generate_py = (d2l_root / "generate.py").resolve()
-    if not generate_py.exists():
-        print("[pipeline] Diff2Lip generate.py missing. Falling back to Wav2Lip.")
-        return run_wav2lip(frames_dir, audio_wav, tmp_dir)
-
-    # Diff2Lip wants a VIDEO input: convert frames -> silent mp4
-    d2l_in_video = (tmp_dir / "d2l_input.mp4").resolve()
-    _make_silent_video(frames_dir, d2l_in_video)
-
-    out_dir = (tmp_dir / "d2l_out").resolve()
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_mp4 = (out_dir / "result.mp4").resolve()
-
-    # Build environment to guarantee correct imports
-    env = os.environ.copy()
-    current_pp = env.get("PYTHONPATH", "")
-
-    # Good mpi4py mock (package)
-    mock_root = _create_mpi_mock((tmp_dir / "mock_libs").resolve())
-
-    # Prefer Diff2Lip bundled guided-diffusion (this is the one with tfg_* APIs)
-    bundled_gd = (d2l_root / "guided-diffusion").resolve()
-
-    python_path_list = [
-        str(mock_root),                     # contains mpi4py package
-        str(bundled_gd) if bundled_gd.exists() else "",
-        str(d2l_root),
-    ]
-    python_path_list = [p for p in python_path_list if p]
-
-    env["PYTHONPATH"] = f"{os.pathsep.join(python_path_list)}{os.pathsep}{current_pp}"
-
-    # Force single-process "distributed" settings
-    env.setdefault("RANK", "0")
-    env.setdefault("WORLD_SIZE", "1")
-    env.setdefault("LOCAL_RANK", "0")
-    env.setdefault("MASTER_ADDR", "127.0.0.1")
-    env.setdefault("MASTER_PORT", "29500")
-
-    cmd = [
-        sys.executable, str(generate_py),
-        "--model_path", str(D2L_CKPT.resolve()),
-        "--video_path", str(d2l_in_video),
-        "--audio_path", str(Path(audio_wav).resolve()),
-        "--out_path", str(out_mp4),
-        "--sample_path", str(out_dir),
-        "--save_orig", "False",
-    ]
-
-    print(f"[pipeline] Diff2Lip running: {' '.join(cmd)}")
-    try:
-        subprocess.check_call(cmd, env=env, cwd=str(d2l_root))
-    except Exception as e:
-        print(f"[pipeline] Diff2Lip failed: {e}. Falling back to Wav2Lip.")
-        return run_wav2lip(frames_dir, audio_wav, tmp_dir)
-
-    if not out_mp4.exists() or out_mp4.stat().st_size == 0:
-        print("[pipeline] Diff2Lip finished but result.mp4 missing/empty. Falling back to Wav2Lip.")
-        return run_wav2lip(frames_dir, audio_wav, tmp_dir)
-
-    # Some envs produce silent mp4 with torchvision; enforce mux if needed
-    if not _video_has_audio(out_mp4):
-        print("[pipeline] Diff2Lip result.mp4 has NO audio. Muxing audio in...")
-        muxed = (out_dir / "result_with_audio.mp4").resolve()
-        _mux_audio_into_video(out_mp4, audio_wav, muxed)
-        return muxed
-
-    return out_mp4
+        return frames_dir
 
 
-def enhance_with_gfpgan(frames_or_vid: Any, tmp_dir: Path) -> Path:
-    """
-    Enhance face quality using GFPGANer.
-    Returns a FRAMES directory (PNG sequence). If input is a video, it extracts frames first.
-    """
+# --------------------------------------------------------------------------- #
+# Stage 4: GFPGAN enhancement (frames only)
+# --------------------------------------------------------------------------- #
+
+def enhance_with_gfpgan(frames_or_video: Any, tmp_dir: Path) -> Path:
     try:
         from gfpgan import GFPGANer
-    except ImportError:
-        print("[pipeline] GFPGAN not installed.")
-        return Path(frames_or_vid)
+    except Exception:
+        print("[pipeline] GFPGAN not installed; skipping.")
+        return Path(frames_or_video)
 
-    input_path = Path(frames_or_vid)
+    import cv2
 
-    # If input is a video, extract frames (audio will be re-added later in encode_mp4)
+    out_dir = tmp_dir / "gfpgan_frames"
+    _ensure_dir(out_dir)
+
+    input_path = Path(frames_or_video)
+
     if input_path.is_file():
-        video_frames_dir = tmp_dir / "gfpgan_in_frames"
-        video_frames_dir.mkdir(exist_ok=True)
+        extracted = tmp_dir / "video_extract_frames"
+        _ensure_dir(extracted)
         subprocess.check_call([
             "ffmpeg", "-y", "-loglevel", "error",
             "-i", str(input_path),
-            str(video_frames_dir / "%04d.png"),
+            str(extracted / "%04d.png"),
         ])
-        input_path = video_frames_dir
+        input_path = extracted
 
     if not input_path.is_dir():
         return input_path
 
-    img_list = sorted(glob.glob(str(input_path / "*.png")))
-    if not img_list:
+    try:
+        restorer = GFPGANer(
+            model_path=str(GFPGAN_CKPT),
+            upscale=2,
+            arch="clean",
+            channel_multiplier=2,
+            bg_upsampler=None,
+        )
+    except Exception as e:
+        print(f"[pipeline] Failed to init GFPGAN: {e}")
         return input_path
 
-    out_dir = tmp_dir / "gfpgan_frames"
-    out_dir.mkdir(exist_ok=True)
+    pngs = sorted(glob.glob(str(input_path / "*.png")))
+    print(f"[pipeline] Enhancing {len(pngs)} frames with GFPGAN...")
 
-    restorer = GFPGANer(
-        model_path=str(GFPGAN_CKPT),
-        upscale=2,
-        arch="clean",
-        channel_multiplier=2,
-        bg_upsampler=None,
-    )
-
-    print(f"[pipeline] Enhancing {len(img_list)} frames with GFPGAN...")
-    for img_path in img_list:
-        basename = os.path.basename(img_path)
-        img = cv2.imread(img_path, cv2.IMREAD_COLOR)
-        _, _, output = restorer.enhance(
-            img,
-            has_aligned=False,
-            only_center_face=False,
-            paste_back=True,
-        )
-        cv2.imwrite(str(out_dir / basename), output)
+    for p in pngs:
+        basename = os.path.basename(p)
+        img = cv2.imread(p, cv2.IMREAD_COLOR)
+        if img is None:
+            continue
+        _, _, out_img = restorer.enhance(img, has_aligned=False, only_center_face=False, paste_back=True)
+        cv2.imwrite(str(out_dir / basename), out_img)
 
     return out_dir
 
 
-def encode_mp4(frames_dir: Path, audio_wav: str, out_mp4: str, fps: int = 25):
-    """
-    Encode PNG frames + audio into MP4 (production-safe):
-      - explicit stream mapping
-      - standard AAC audio rate
-      - shortest
-    """
-    if not _ffmpeg_binary_available():
-        raise RuntimeError("ffmpeg not found")
+# --------------------------------------------------------------------------- #
+# Final encode (frames + audio)
+# --------------------------------------------------------------------------- #
 
-    frames_dir = Path(frames_dir)
-    if not frames_dir.is_dir():
-        raise RuntimeError(f"encode_mp4 expected a frames directory, got: {frames_dir}")
+def encode_mp4(frames_dir: Path, audio_wav: str, out_mp4: str, fps: int = 25) -> None:
+    if not _ffmpeg_binary_available():
+        raise RuntimeError("ffmpeg not found on PATH")
 
     frame_files = sorted(glob.glob(str(frames_dir / "*.png")))
     if not frame_files:
@@ -463,41 +741,22 @@ def encode_mp4(frames_dir: Path, audio_wav: str, out_mp4: str, fps: int = 25):
     cmd = [
         "ffmpeg", "-y",
         "-loglevel", "warning",
-        "-thread_queue_size", "512",
+        "-thread_queue_size", "1024",
         "-r", str(fps),
-        "-i", str(frames_dir / "%04d.png"),
-        "-thread_queue_size", "512",
-        "-i", str(audio_wav),
-        "-map", "0:v:0",
-        "-map", "1:a:0",
+        "-i", f"{frames_dir}/%04d.png",
+        "-i", audio_wav,
         "-c:v", "libx264",
         "-preset", "fast",
         "-crf", "23",
         "-pix_fmt", "yuv420p",
         "-c:a", "aac",
-        "-b:a", "128k",
-        "-ar", "44100",
+        "-b:a", "192k",
         "-shortest",
-        str(out_mp4),
+        "-movflags", "+faststart",
+        out_mp4,
     ]
     subprocess.check_call(cmd)
 
-    # Quick verification (non-fatal)
-    if _ffprobe_binary_available():
-        try:
-            streams = subprocess.check_output(
-                [
-                    "ffprobe", "-v", "error",
-                    "-show_entries", "stream=codec_type",
-                    "-of", "default=noprint_wrappers=1:nokey=1",
-                    str(out_mp4),
-                ],
-                text=True,
-            ).strip().splitlines()
-            if "audio" not in streams:
-                print("[pipeline] ⚠️  Output has no audio stream (silent).")
-        except Exception as e:
-            print(f"[pipeline] ⚠️  ffprobe verification failed: {e}")
 
 # --------------------------------------------------------------------------- #
 # Main entry point
@@ -509,84 +768,55 @@ def render_pipeline(
     audio: str,
     out_path: str,
     reference_video: Optional[str] = None,
-    viseme_json: Optional[str] = None,  # kept for API compatibility
+    viseme_json: Optional[str] = None,
     quality_mode: str = "auto",
 ) -> str:
     """
-    Main pipeline: FOMM → Lip Sync (Diff2Lip/Wav2Lip) → GFPGAN(optional) → Final MP4
-
-    Returns absolute path to finished MP4 with audio.
+    FOMM -> (Diff2Lip or Wav2Lip) -> optional GFPGAN -> final mp4 with guaranteed audio
     """
-    import logging
-    logger = logging.getLogger("pipeline")
-
     tmp = Path(tempfile.mkdtemp(prefix="vidgen_"))
 
-    face_image_p = Path(face_image)
-    if not face_image_p.exists():
+    if not Path(face_image).exists():
         raise FileNotFoundError(f"Face image not found: {face_image}")
+    if not Path(audio).exists():
+        raise FileNotFoundError(f"Audio file not found: {audio}")
 
-    audio_fixed = _ensure_audio_is_decodable(audio, tmp)
-    out_path_abs = str(Path(out_path).resolve())
-    logger.info(f"Render: {face_image} + {audio_fixed} -> {out_path_abs}")
+    fomm_frames = run_fomm(face_image, audio, reference_video, tmp)
 
-    # 1) FOMM frames
-    fomm_frames = run_fomm(str(face_image_p), audio_fixed, reference_video, tmp)
+    lip_result: Path
+    want_d2l = (quality_mode in ("high_quality", "auto")) and torch.cuda.is_available()
+    d2l_available = _diff2lip_script().exists() and (D2L_PAPER_CKPT.exists() or D2L_LEGACY_CKPT.exists())
 
-    # 2) Lip sync selection
-    has_d2l = (EXT_DEPS_DIR / "Diff2Lip" / "generate.py").exists()
-    use_d2l = (
-        quality_mode == "high_quality"
-        or (quality_mode == "auto" and has_d2l and torch.cuda.is_available())
-    )
-
-    if use_d2l:
-        logger.info("Using Diff2Lip")
-        lip_result = run_diff2lip(fomm_frames, audio_fixed, tmp)
+    if want_d2l and d2l_available:
+        try:
+            lip_result = run_diff2lip(fomm_frames, audio, tmp)
+        except Exception as e:
+            print(f"[pipeline] Diff2Lip failed: {e}. Falling back to Wav2Lip.")
+            lip_result = run_wav2lip(fomm_frames, audio, tmp)
     else:
-        logger.info("Using Wav2Lip")
-        lip_result = run_wav2lip(fomm_frames, audio_fixed, tmp)
+        lip_result = run_wav2lip(fomm_frames, audio, tmp)
 
-    # 3) GFPGAN (optional) -> always produces FRAMES if it runs
-    final_result: Path | str = lip_result
+    final_result: Path = lip_result
     if GFPGAN_CKPT.exists():
-        logger.info("Enhancing with GFPGAN")
         final_result = enhance_with_gfpgan(lip_result, tmp)
 
-    # 4) Finalize output
-    final_result_p = Path(final_result)
+    out_path_abs = str(Path(out_path).resolve())
+    out_path_p = Path(out_path_abs)
+    out_path_p.parent.mkdir(parents=True, exist_ok=True)
 
-    if final_result_p.is_file():
-        # If we ended on a video, ensure it has audio, else mux.
-        if not _video_has_audio(final_result_p):
-            logger.warning("Final video is missing audio. Muxing audio in...")
-            muxed = tmp / "final_muxed.mp4"
-            _mux_audio_into_video(final_result_p, audio_fixed, muxed)
-            shutil.copy(str(muxed), out_path_abs)
-        else:
-            shutil.copy(str(final_result_p), out_path_abs)
+    if final_result.is_file() and final_result.suffix.lower() == ".mp4":
+        tmp_remux = tmp / "remux.mp4"
+        _remux_video_with_audio(final_result, Path(audio), tmp_remux)
+        shutil.copy(str(tmp_remux), out_path_abs)
     else:
-        # Frames directory -> encode with audio
-        encode_mp4(final_result_p, audio_fixed, out_path_abs)
+        tmp_encoded = tmp / "encoded.mp4"
+        encode_mp4(final_result, audio, str(tmp_encoded), fps=25)
 
-    if not Path(out_path_abs).exists():
-        raise RuntimeError(f"❌ Output file not created: {out_path_abs}")
+        tmp_remux = tmp / "remux.mp4"
+        _remux_video_with_audio(tmp_encoded, Path(audio), tmp_remux)
+        shutil.copy(str(tmp_remux), out_path_abs)
 
-    size_mb = Path(out_path_abs).stat().st_size / (1024 * 1024)
-    logger.info(f"✅ Pipeline complete: {out_path_abs} ({size_mb:.2f} MB)")
+    if not _verify_has_audio(Path(out_path_abs)):
+        print("[pipeline] ⚠️ WARNING: final output seems to have no audio stream after remux.")
+
     return out_path_abs
-
-
-# --------------------------------------------------------------------------- #
-# Runtime checks
-# --------------------------------------------------------------------------- #
-
-def _resolve_deps_check():
-    if not (EXT_DEPS_DIR / "first-order-model").exists():
-        print("WARNING: 'first-order-model' not found in external_deps.")
-    if not _ffmpeg_binary_available():
-        print("WARNING: ffmpeg not found in PATH. Encoding/muxing will fail.")
-    if not (EXT_DEPS_DIR / "Diff2Lip" / "generate.py").exists():
-        print("WARNING: Diff2Lip generate.py not found (will fallback to Wav2Lip).")
-
-_resolve_deps_check()

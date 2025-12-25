@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import sys
 import time
 from pathlib import Path
 
@@ -59,7 +58,6 @@ def generate_video(image_path: Path, audio_path: Path, output_path: Path, qualit
 
     start_time = time.time()
 
-    # Import here so demo startup prints are fast and failures are clean
     from app.pipeline import render_pipeline  # noqa: WPS433
 
     result = render_pipeline(
@@ -84,10 +82,14 @@ def generate_video(image_path: Path, audio_path: Path, output_path: Path, qualit
 
 def build_argparser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Avatar Renderer MCP demo")
-    p.add_argument("--image", type=Path, default=Path("tests/assets/alice.png"), help="Path to portrait image (png/jpg)")
-    p.add_argument("--audio", type=Path, default=Path("tests/assets/hello.wav"), help="Path to audio file (wav recommended)")
-    p.add_argument("--out", type=Path, default=Path("demo.mp4"), help="Output mp4 path")
-    p.add_argument("--quality", default="auto", choices=["auto", "real_time", "high_quality"], help="Quality mode")
+    p.add_argument("--image", type=Path, default=Path("tests/assets/alice.png"),
+                   help="Path to portrait image (png/jpg)")
+    p.add_argument("--audio", type=Path, default=Path("tests/assets/hello.wav"),
+                   help="Path to audio file (wav recommended)")
+    p.add_argument("--out", type=Path, default=Path("demo.mp4"),
+                   help="Output mp4 path")
+    p.add_argument("--quality", default="auto", choices=["auto", "real_time", "high_quality"],
+                   help="Quality mode")
     return p
 
 
@@ -95,13 +97,11 @@ def main() -> int:
     print_banner()
     args = build_argparser().parse_args()
 
-    # Print environment hints
     model_root = os.environ.get("MODEL_ROOT", "(auto)")
     ext_deps = os.environ.get("EXT_DEPS_DIR", "external_deps")
     print(f"🔧 MODEL_ROOT: {model_root}")
     print(f"🔧 EXT_DEPS_DIR: {ext_deps}\n")
 
-    # Validate assets
     print("📁 Checking assets...")
     try:
         check_file("Image", args.image)
@@ -116,7 +116,6 @@ def main() -> int:
 
     print()
 
-    # Run pipeline
     try:
         result = generate_video(args.image, args.audio, args.out, args.quality)
     except Exception as e:
