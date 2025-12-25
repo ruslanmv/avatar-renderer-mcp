@@ -164,9 +164,15 @@ $RECYCLE.BIN/
 /models/
 !/models/.gitkeep
 
-# External Git dependencies
-/external_deps/
-!/external_deps/.gitkeep
+# External dependencies (Vendoring)
+# NOTE: We do NOT ignore 'external_deps/' because we want to track the code.
+# However, we ignore nested git metadata files from those libraries 
+# so we don't accidentally override our own git settings.
+external_deps/**/.git
+external_deps/**/.gitignore
+external_deps/**/.gitattributes
+external_deps/**/.github/
+external_deps/**/.gitmodules
 
 # Temporary directories
 /tmp/
@@ -235,4 +241,12 @@ token.json
 *.avi
 *.mov
 *.mkv
-=*
+
+*.pth
+
+* copy *.*
+* copy*.*
+* copy 
+* copy * 
+
+*.pth

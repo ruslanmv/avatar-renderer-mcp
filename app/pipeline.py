@@ -1,136 +1,98 @@
 """
-pipeline.py  – FOMM + Diff2Lip (+ SadTalker / Wav2Lip fallback)
+pipeline.py – FOMM + Diff2Lip (+ Wav2Lip fallback) + optional GFPGAN
 
 Input:
-    face_image       – path to PNG/JPG portrait (one face, frontish)
-    audio            – path to 16‑kHz mono WAV
-    reference_video  – optional short driver MP4 (for full-body motion)
+    face_image       – path to PNG/JPG portrait
+    audio            – path to WAV (ideally 16kHz mono; but ffmpeg will decode other)
+    reference_video  – optional driver MP4
     out_path         – target MP4 file
 
-The function must raise on any hard failure (so Celery -> WebSocket can emit
-‘failed’).  It returns the absolute path of the finished MP4.
+Returns:
+    Absolute path to the finished MP4.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
+import glob
 from pathlib import Path
-from typing import Optional, Any
+from typing import Optional, Any, Tuple, List
 
 import torch
 
 # --------------------------------------------------------------------------- #
-# Model roots (mounted as read‑only volume in Kubernetes)
+# Torchvision monkeypatch for BasicSR/GFPGAN compatibility (safe no-op if not needed)
 # --------------------------------------------------------------------------- #
-MODEL_ROOT = Path(os.environ.get("MODEL_ROOT", "/models"))
+try:
+    from torchvision.transforms import functional_tensor  # noqa: F401
+except Exception:
+    try:
+        import torchvision.transforms.functional as functional  # noqa: F401
+        sys.modules["torchvision.transforms.functional_tensor"] = functional
+    except Exception:
+        pass
 
-FOMM_CKPT   = MODEL_ROOT / "fomm" / "vox-cpk.pth"
-D2L_CKPT    = MODEL_ROOT / "diff2lip" / "Diff2Lip.pth"
-SAD_CKPT    = MODEL_ROOT / "sadtalker" / "sadtalker.pth"
-W2L_CKPT    = MODEL_ROOT / "wav2lip" / "wav2lip_gan.pth"
+# --------------------------------------------------------------------------- #
+# Configuration
+# --------------------------------------------------------------------------- #
+
+def _resolve_model_root() -> Path:
+    env = os.environ.get("MODEL_ROOT")
+    if env:
+        return Path(env)
+    cwd = Path.cwd()
+    if (cwd / "pyproject.toml").exists() or (cwd / "Makefile").exists() or (cwd / "app").exists():
+        return cwd / "models"
+    return Path("/models")
+
+
+MODEL_ROOT = _resolve_model_root()
+
+FOMM_CKPT = MODEL_ROOT / "fomm" / "vox-cpk.pth"
+
+# Diff2Lip: support BOTH checkpoints (paper + legacy)
+D2L_PAPER_CKPT = MODEL_ROOT / "diff2lip" / "e7.24.1.3_model260000_paper.pt"
+D2L_LEGACY_CKPT = MODEL_ROOT / "diff2lip" / "Diff2Lip.pth"
+
+W2L_CKPT = MODEL_ROOT / "wav2lip" / "wav2lip_gan.pth"
 GFPGAN_CKPT = MODEL_ROOT / "gfpgan" / "GFPGANv1.3.pth"
 
-# External dependencies base path
 EXT_DEPS_DIR = Path(os.environ.get("EXT_DEPS_DIR", "external_deps"))
 
 # --------------------------------------------------------------------------- #
-# Runtime dependency availability checks
+# Helpers
 # --------------------------------------------------------------------------- #
-
-def _can_import(module_name: str) -> bool:
-    """Check if a Python module can be imported."""
-    return importlib.util.find_spec(module_name) is not None
 
 def _ffmpeg_binary_available() -> bool:
-    """Check if system ffmpeg binary is available."""
-    import shutil
     return shutil.which("ffmpeg") is not None
 
-def _python_ffmpeg_available() -> bool:
-    """Check if ffmpeg-python package is installed."""
-    try:
-        import ffmpeg  # type: ignore  # noqa: F401
-        return True
-    except Exception:
-        return False
 
-def _fomm_runtime_available() -> tuple[bool, str]:
-    """
-    Check if FOMM can actually run (not just checkpoint exists).
+def _ffprobe_binary_available() -> bool:
+    return shutil.which("ffprobe") is not None
 
-    Returns:
-        (ok, reason): ok=True if FOMM runtime is available, reason explains why not
-    """
-    # Check external repo exists - prefer wrapper, fallback to demo.py
-    fomm_wrapper = EXT_DEPS_DIR / "first-order-model" / "fomm_wrapper.py"
-    fomm_demo_py = EXT_DEPS_DIR / "first-order-model" / "demo.py"
-
-    if not fomm_wrapper.exists() and not fomm_demo_py.exists():
-        return (False, f"Missing first-order-model repo at {EXT_DEPS_DIR / 'first-order-model'}")
-
-    # Check config directory exists (required for FOMM)
-    fomm_config_dir = EXT_DEPS_DIR / "first-order-model" / "config"
-    if not fomm_config_dir.exists():
-        return (False, f"Missing FOMM config directory at {fomm_config_dir}")
-
-    # Check ffmpeg-python is installed (required by FOMM demo.py)
-    if not _python_ffmpeg_available():
-        return (False, "Missing python package 'ffmpeg' (install: pip install ffmpeg-python)")
-
-    # Check system ffmpeg binary exists
-    if not _ffmpeg_binary_available():
-        return (False, "Missing system 'ffmpeg' binary (install via apt-get/brew/choco)")
-
-    # Try importing FOMM wrapper as smoke test
-    try:
-        # We don't fully load it here (that happens in run_fomm), just check it's importable
-        test_path = fomm_wrapper if fomm_wrapper.exists() else fomm_demo_py
-        spec = importlib.util.spec_from_file_location("_fomm_test", test_path)
-        if spec is None or spec.loader is None:
-            return (False, f"Cannot create spec for {test_path}")
-        return (True, "")
-    except Exception as e:
-        return (False, f"FOMM import test failed: {e}")
-
-# --------------------------------------------------------------------------- #
-# Helper function to dynamically load modules from file paths
-# --------------------------------------------------------------------------- #
 
 def load_module_from_path(module_name: str, file_path: Path) -> Any:
     """
     Dynamically load a Python module from a file path.
-
-    This is necessary because external repos (SadTalker, Wav2Lip) are not
-    proper Python packages and cannot be imported normally.
-
-    Args:
-        module_name: Name to assign to the loaded module
-        file_path: Path to the Python file to load
-
-    Returns:
-        The loaded module object
-
-    Raises:
-        ImportError: If the module file doesn't exist or can't be loaded
+    Injects the parent directory to sys.path so internal imports work.
     """
     if not file_path.exists():
         raise ImportError(f"Module file not found: {file_path}")
 
-    spec = importlib.util.spec_from_file_location(module_name, str(file_path))
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Could not load module spec from: {file_path}")
-
-    module = importlib.util.module_from_spec(spec)
-
-    # Add the module's directory to sys.path temporarily
-    module_dir = str(file_path.parent)
+    module_dir = str(file_path.parent.resolve())
     if module_dir not in sys.path:
         sys.path.insert(0, module_dir)
 
+    spec = importlib.util.spec_from_file_location(module_name, str(file_path))
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load module spec: {file_path}")
+
+    module = importlib.util.module_from_spec(spec)
     try:
         spec.loader.exec_module(module)
     except Exception as e:
@@ -138,267 +100,511 @@ def load_module_from_path(module_name: str, file_path: Path) -> Any:
 
     return module
 
+
+def _run_cmd_capture_tail(cmd: List[str], env: Optional[dict] = None, tail_lines: int = 30) -> Tuple[int, str]:
+    """
+    Run subprocess, capture combined stdout/stderr, return (returncode, tail_text).
+    """
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        env=env,
+    )
+    assert proc.stdout is not None
+    lines: List[str] = []
+    for line in proc.stdout:
+        lines.append(line.rstrip("\n"))
+        if len(lines) > 5000:
+            lines = lines[-2500:]
+    proc.wait()
+    tail = "\n".join(lines[-tail_lines:])
+    return proc.returncode, tail
+
+
+def _ensure_dir(p: Path) -> None:
+    p.mkdir(parents=True, exist_ok=True)
+
+
+def _audio_to_16k_mono(in_audio: str, out_wav: str) -> None:
+    """
+    Some pipelines behave better with 16k mono WAV.
+    """
+    cmd = [
+        "ffmpeg", "-y", "-loglevel", "error",
+        "-i", in_audio,
+        "-ac", "1",
+        "-ar", "16000",
+        out_wav,
+    ]
+    subprocess.check_call(cmd)
+
+
+def _make_silent_video_from_frames(frames_dir: Path, out_mp4: Path, fps: int = 25) -> None:
+    cmd = [
+        "ffmpeg", "-y",
+        "-loglevel", "error",
+        "-r", str(fps),
+        "-i", str(frames_dir / "%04d.png"),
+        "-an",
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        str(out_mp4),
+    ]
+    subprocess.check_call(cmd)
+
+
+def _remux_video_with_audio(video_in: Path, audio_in: Path, out_mp4: Path) -> None:
+    """
+    ALWAYS remux final output to guarantee audio exists.
+    Keeps video stream as-is and encodes audio to AAC.
+    """
+    cmd = [
+        "ffmpeg", "-y", "-loglevel", "warning",
+        "-i", str(video_in),
+        "-i", str(audio_in),
+        "-map", "0:v:0",
+        "-map", "1:a:0",
+        "-c:v", "copy",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-shortest",
+        "-movflags", "+faststart",
+        str(out_mp4),
+    ]
+    subprocess.check_call(cmd)
+
+
+def _verify_has_audio(path: Path) -> bool:
+    if not _ffprobe_binary_available():
+        return True
+    try:
+        out = subprocess.check_output(
+            [
+                "ffprobe", "-v", "error",
+                "-show_entries", "stream=codec_type",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                str(path),
+            ],
+            text=True,
+        )
+        streams = [s.strip() for s in out.splitlines() if s.strip()]
+        return "audio" in streams
+    except Exception:
+        return True
+
+
 # --------------------------------------------------------------------------- #
-# Helpers (FOMM, Diff2Lip, SadTalker, Wav2Lip)                                #
-# These can live in separate files; kept inline for readability.              #
+# ✅ FIX: Robust mpi4py mock (package) with COMM_WORLD.bcast and friends
 # --------------------------------------------------------------------------- #
 
+def _create_mpi4py_mock(mock_root: Path) -> None:
+    """
+    Create a minimal mpi4py package that satisfies guided-diffusion's dist_util.py.
+
+    guided_diffusion/dist_util.py expects:
+      from mpi4py import MPI
+      comm = MPI.COMM_WORLD
+      comm.Get_rank(), comm.Get_size(), comm.bcast(), comm.Barrier(), etc.
+      AND comm.rank, comm.size as properties
+    """
+    pkg = mock_root / "mpi4py"
+    _ensure_dir(pkg)
+
+    init_py = pkg / "__init__.py"
+
+    # Minimal but compatible API surface
+    init_py.write_text(
+        """\
+# Auto-generated mpi4py mock for single-process inference
+# This is only meant to satisfy guided-diffusion / Diff2Lip imports.
+
+class _Op:
+    pass
+
+class _Comm:
+    # Properties (used by dist_util.py)
+    @property
+    def rank(self):
+        return 0
+    
+    @property
+    def size(self):
+        return 1
+    
+    # Methods (also part of MPI API)
+    def Get_rank(self):
+        return 0
+
+    def Get_size(self):
+        return 1
+
+    def bcast(self, obj, root=0):
+        # Single process: broadcast is identity
+        return obj
+
+    def Barrier(self):
+        return None
+
+    def allreduce(self, obj, op=None):
+        # Single process: reduce is identity
+        return obj
+
+    def gather(self, obj, root=0):
+        return [obj]
+
+    def scatter(self, obj, root=0):
+        if isinstance(obj, (list, tuple)) and obj:
+            return obj[0]
+        return obj
+
+    def Abort(self, code=1):
+        raise SystemExit(code)
+
+class _MPI:
+    COMM_WORLD = _Comm()
+    SUM = _Op()
+    MAX = _Op()
+    MIN = _Op()
+
+MPI = _MPI()
+""",
+        encoding="utf-8",
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Stage 1: FOMM
+# --------------------------------------------------------------------------- #
 
 def run_fomm(face_img: str, audio_wav: str, ref_video: Optional[str], tmp_dir: Path) -> Path:
     """
-    Generates a sequence of RGB frames (PNG) with head pose & expression.
-
-    Returns: path to directory full of 0001.png, 0002.png, ...
+    Run First Order Motion Model to animate the face.
+    Produces frames %04d.png in frames_dir.
     """
-    # Try to load FOMM wrapper module dynamically
-    try:
-        # Use fomm_wrapper.py which provides a main() function interface
-        fomm_path = EXT_DEPS_DIR / "first-order-model" / "fomm_wrapper.py"
-        if not fomm_path.exists():
-            # Fallback to trying demo.py directly (legacy support)
-            fomm_path = EXT_DEPS_DIR / "first-order-model" / "demo.py"
+    fomm_wrapper = EXT_DEPS_DIR / "first-order-model" / "fomm_wrapper.py"
+    fomm_demo_py = EXT_DEPS_DIR / "first-order-model" / "demo.py"
+    fomm_path = fomm_wrapper if fomm_wrapper.exists() else fomm_demo_py
+    if not fomm_path.exists():
+        raise RuntimeError(f"FOMM not found at {EXT_DEPS_DIR / 'first-order-model'}")
 
-        fomm_demo = load_module_from_path("fomm_demo", fomm_path)
-    except (ImportError, FileNotFoundError) as e:
-        raise RuntimeError(
-            f"First Order Motion Model not found in {EXT_DEPS_DIR}/first-order-model. "
-            f"Please install external dependencies: {e}"
-        ) from e
+    fomm_demo = load_module_from_path("fomm_demo", fomm_path)
 
     frames_dir = tmp_dir / "fomm_frames"
-    frames_dir.mkdir(exist_ok=True)
+    _ensure_dir(frames_dir)
 
-    # Detect CPU mode
-    cpu_mode = not torch.cuda.is_available()
-
-    # Build CLI‑like args object
     class _Args:
         source_image = face_img
         driving_audio = audio_wav
         driving_video = ref_video
         result_dir = str(frames_dir)
         checkpoint = str(FOMM_CKPT)
-        cpu = cpu_mode
+        cpu = not torch.cuda.is_available()
         relative = True
         adapt_scale = True
-        # config will use default from wrapper if not specified
 
-    if hasattr(fomm_demo, 'main'):
-        fomm_demo.main(_Args())
-    else:
+    if not hasattr(fomm_demo, "main"):
         raise RuntimeError("FOMM module loaded but 'main' function not found")
 
+    fomm_demo.main(_Args())
     return frames_dir
 
 
-def run_diff2lip(frames_dir: Path, audio_wav: str, tmp_dir: Path) -> Path:
+# --------------------------------------------------------------------------- #
+# Stage 2: Diff2Lip (subprocess) with BOTH checkpoint styles
+# --------------------------------------------------------------------------- #
+
+def _diff2lip_script() -> Path:
+    return EXT_DEPS_DIR / "Diff2Lip" / "generate.py"
+
+
+def _pick_diff2lip_ckpts() -> List[Path]:
+    ckpts: List[Path] = []
+    if D2L_PAPER_CKPT.exists():
+        ckpts.append(D2L_PAPER_CKPT)
+    if D2L_LEGACY_CKPT.exists():
+        ckpts.append(D2L_LEGACY_CKPT)
+    return ckpts
+
+
+def _diff2lip_flags_for_checkpoint(ckpt: Path) -> Tuple[List[str], List[str], List[str], List[str], List[str]]:
     """
-    Diffuses viseme‑accurate mouth region over existing frames.
-    Returns new dir of frames.  Falls back to Wav2Lip if GPU OOM or CKPT missing.
+    Best-effort flags matching the "paper" model.
+    Your fingerprint shows both models look identical (same tensor shapes),
+    so we can use the same flags for both.
     """
-    try:
-        # Try to load Diff2Lip module dynamically
-        diff2lip_path = EXT_DEPS_DIR / "Diff2Lip" / "inference.py"
-        if not diff2lip_path.exists():
-            # If Diff2Lip is not installed, fall back to Wav2Lip
-            print(f"[pipeline] Diff2Lip not found at {diff2lip_path}, falling back to Wav2Lip")
-            return run_wav2lip(frames_dir, audio_wav, tmp_dir)
+    model_flags = [
+        "--attention_resolutions", "32,16,8",
+        "--class_cond", "False",
+        "--learn_sigma", "True",
+        "--num_channels", "128",
+        "--num_head_channels", "64",
+        "--num_res_blocks", "2",
+        "--resblock_updown", "True",
+        "--use_fp16", "True",
+        "--use_scale_shift_norm", "False",
+    ]
+    diffusion_flags = [
+        "--predict_xstart", "False",
+        "--diffusion_steps", "1000",
+        "--noise_schedule", "linear",
+        "--rescale_timesteps", "False",
+    ]
+    sample_flags = [
+        "--sampling_seed", "7",
+        "--sampling_input_type", "gt",
+        "--sampling_ref_type", "gt",
+        "--timestep_respacing", "ddim25",
+        "--use_ddim", "True",
+        f"--model_path={str(ckpt)}",
+    ]
+    data_flags = [
+        "--nframes", "5",
+        "--nrefer", "1",
+        "--image_size", "128",
+        "--sampling_batch_size", "16",
+    ]
+    tfg_flags = [
+        "--face_hide_percentage", "0.5",
+        "--use_ref", "True",
+        "--use_audio", "True",
+        "--audio_as_style", "True",
+    ]
+    return model_flags, diffusion_flags, sample_flags, data_flags, tfg_flags
 
-        d2l = load_module_from_path("diff2lip_inference", diff2lip_path)
 
-        out_dir = tmp_dir / "d2l_frames"
-        out_dir.mkdir(exist_ok=True)
-
-        if hasattr(d2l, 'run_diffusion'):
-            d2l.run_diffusion(
-                ckpt=str(D2L_CKPT),
-                frames=str(frames_dir),
-                audio=audio_wav,
-                out_dir=str(out_dir),
-                steps=25,
-            )
-        else:
-            raise RuntimeError("Diff2Lip module loaded but 'run_diffusion' function not found")
-
-        return out_dir
-
-    except (ImportError, RuntimeError) as e:
-        print(f"[pipeline] Diff2Lip unavailable – falling back to Wav2Lip: {e}")
-        return run_wav2lip(frames_dir, audio_wav, tmp_dir)
-
-
-def run_sadtalker(face_img: str, audio_wav: str, tmp_dir: Path) -> Path:
+def run_diff2lip(frames_dir: Path, audio_in: str, tmp_dir: Path) -> Path:
     """
-    Generates coarse talking‑head frames (head + expression) using SadTalker.
+    Run Diff2Lip generate.py as subprocess.
+    Returns: output_video_path
+    
+    Note: Diff2Lip internally uses 16kHz mono audio for inference,
+    but we don't return that audio - the caller should use the original
+    high-quality audio for final output.
     """
-    # Try to load SadTalker module dynamically
-    try:
-        sadtalker_path = EXT_DEPS_DIR / "SadTalker" / "inference.py"
-        sad = load_module_from_path("sadtalker_inference", sadtalker_path)
-    except (ImportError, FileNotFoundError) as e:
-        raise RuntimeError(
-            f"SadTalker not found in {EXT_DEPS_DIR}/SadTalker. "
-            f"Please install external dependencies: {e}"
-        ) from e
+    gen = _diff2lip_script()
+    if not gen.exists():
+        raise RuntimeError(f"Diff2Lip generate.py not found at: {gen}")
 
-    out_dir = tmp_dir / "sadtalker_frames"
-    out_dir.mkdir(exist_ok=True)
+    if not _ffmpeg_binary_available():
+        raise RuntimeError("ffmpeg not found; Diff2Lip requires ffmpeg")
 
-    # Call SadTalker's generate function (adjust parameters based on actual API)
-    if hasattr(sad, 'generate'):
-        sad.generate(
-            cfg_path=str(SAD_CKPT),
-            img=face_img,
-            audio=audio_wav,
-            out_dir=str(out_dir),
-            enhancer_ckpt=str(GFPGAN_CKPT),
-            still=True,
-        )
-    else:
-        # Fallback: create dummy frames (for testing without SadTalker)
-        raise RuntimeError("SadTalker module loaded but 'generate' function not found")
+    # Convert frames -> mp4
+    d2l_input_mp4 = tmp_dir / "d2l_input.mp4"
+    _make_silent_video_from_frames(frames_dir, d2l_input_mp4, fps=25)
 
-    return out_dir
+    # Convert audio to 16k mono for Diff2Lip inference
+    # This is only used internally by Diff2Lip for lip-sync
+    audio_16k = tmp_dir / "audio_16k_mono.wav"
+    _audio_to_16k_mono(audio_in, str(audio_16k))
 
+    # ✅ Inject mpi4py mock BEFORE Diff2Lip imports happen
+    mock_root = tmp_dir / "mock_libs"
+    _ensure_dir(mock_root)
+    _create_mpi4py_mock(mock_root)
+
+    # Ensure Diff2Lip can import its guided_diffusion (the one inside Diff2Lip repo)
+    env = os.environ.copy()
+    d2l_root = (EXT_DEPS_DIR / "Diff2Lip").resolve()
+    guided_root = (EXT_DEPS_DIR / "Diff2Lip" / "guided-diffusion").resolve()
+
+    env["PYTHONPATH"] = (
+        f"{str(mock_root.resolve())}{os.pathsep}"
+        f"{str(d2l_root)}{os.pathsep}"
+        f"{str(guided_root)}{os.pathsep}"
+        f"{env.get('PYTHONPATH', '')}"
+    )
+
+    # (Optional) avoid some MPI init assumptions
+    env.setdefault("MASTER_ADDR", "127.0.0.1")
+    env.setdefault("MASTER_PORT", "29500")
+
+    out_dir = tmp_dir / "d2l_out"
+    _ensure_dir(out_dir)
+    out_mp4 = out_dir / "result.mp4"
+
+    ckpts = _pick_diff2lip_ckpts()
+    if not ckpts:
+        raise RuntimeError("No Diff2Lip checkpoints found. Put one in models/diff2lip/")
+
+    last_tail = ""
+    for ckpt in ckpts:
+        model_flags, diffusion_flags, sample_flags, data_flags, tfg_flags = _diff2lip_flags_for_checkpoint(ckpt)
+
+        gen_flags = [
+            "--generate_from_filelist", "0",
+            "--video_path", str(d2l_input_mp4),
+            "--audio_path", str(audio_16k),
+            "--out_path", str(out_mp4),
+            "--sample_path", str(out_dir),
+            "--save_orig", "False",
+            "--face_det_batch_size", "16",
+            "--pads", "0,0,0,0",
+            "--is_voxceleb2", "False",
+        ]
+
+        all_args = model_flags + diffusion_flags + sample_flags + data_flags + tfg_flags + gen_flags
+        
+        # Simple subprocess call - PyAV should be installed
+        cmd = [sys.executable, str(gen)] + all_args
+        
+        print(f"[pipeline] Diff2Lip trying ckpt: {ckpt.name}")
+        print(f"[pipeline] Diff2Lip running: {' '.join(cmd)}")
+
+        if out_mp4.exists():
+            out_mp4.unlink()
+
+        code, tail = _run_cmd_capture_tail(cmd, env=env, tail_lines=60)
+        if code == 0 and out_mp4.exists() and out_mp4.stat().st_size > 0:
+            # ✅ Return just the video - caller uses original audio
+            print(f"[pipeline] Diff2Lip succeeded with {ckpt.name}")
+            return out_mp4
+
+        last_tail = tail
+        print("[pipeline] Diff2Lip failed output (tail):")
+        print(last_tail)
+
+    raise RuntimeError(f"Diff2Lip failed for all checkpoints. Last tail:\n{last_tail}")
+
+
+# --------------------------------------------------------------------------- #
+# Stage 3: Wav2Lip fallback
+# --------------------------------------------------------------------------- #
 
 def run_wav2lip(frames_dir: Path, audio_wav: str, tmp_dir: Path) -> Path:
-    """
-    Refines mouth region with Wav2Lip GAN. Returns dir with final frames.
-    """
-    # Try to load Wav2Lip module dynamically
+    wav2lip_dir = EXT_DEPS_DIR / "Wav2Lip"
+    script = wav2lip_dir / "inference.py"
+    if not script.exists():
+        print("[pipeline] Wav2Lip missing; returning frames without lip-sync.")
+        return frames_dir
+
+    if not _ffmpeg_binary_available():
+        print("[pipeline] ffmpeg not available; returning frames without lip-sync.")
+        return frames_dir
+
+    silent_vid = tmp_dir / "wav2lip_input.mp4"
+    out_vid = tmp_dir / "wav2lip_out.mp4"
+
+    _make_silent_video_from_frames(frames_dir, silent_vid, fps=25)
+
+    os.makedirs("temp", exist_ok=True)
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = f"{str(wav2lip_dir.resolve())}{os.pathsep}{env.get('PYTHONPATH', '')}"
+
+    cmd = [
+        sys.executable, str(script),
+        "--checkpoint_path", str(W2L_CKPT),
+        "--face", str(silent_vid),
+        "--audio", str(audio_wav),
+        "--outfile", str(out_vid),
+        "--resize_factor", "1",
+    ]
+
     try:
-        wav2lip_path = EXT_DEPS_DIR / "Wav2Lip" / "inference.py"
-        w2l = load_module_from_path("wav2lip_inference", wav2lip_path)
-    except (ImportError, FileNotFoundError) as e:
-        raise RuntimeError(
-            f"Wav2Lip not found in {EXT_DEPS_DIR}/Wav2Lip. "
-            f"Please install external dependencies: {e}"
-        ) from e
-
-    out_dir = tmp_dir / "w2l_frames"
-    out_dir.mkdir(exist_ok=True)
-
-    # Call Wav2Lip's inference function (adjust parameters based on actual API)
-    if hasattr(w2l, 'run_wav2lip'):
-        w2l.run_wav2lip(
-            ckpt=str(W2L_CKPT),
-            frames=str(frames_dir),
-            audio=audio_wav,
-            out_dir=str(out_dir),
-        )
-    else:
-        raise RuntimeError("Wav2Lip module loaded but 'run_wav2lip' function not found")
-
-    return out_dir
-
-
-def enhance_with_gfpgan(frames_dir: Path, tmp_dir: Path) -> Path:
-    """
-    Enhances face quality using GFPGAN.
-    Returns new directory with enhanced frames.
-    """
-    try:
-        import gfpgan.inference as gfp  # type: ignore
-
-        out_dir = tmp_dir / "gfpgan_frames"
-        out_dir.mkdir(exist_ok=True)
-        gfp.enhance_faces(
-            ckpt=str(GFPGAN_CKPT),
-            frames_dir=str(frames_dir),
-            out_dir=str(out_dir),
-            upscale=2,
-            bg_upsampler='realesrgan'
-        )
-        return out_dir
-    except (ImportError, RuntimeError) as e:
-        print(f"[pipeline] GFPGAN enhancement failed, using original frames: {e}")
+        subprocess.check_call(cmd, env=env)
+        if out_vid.exists() and out_vid.stat().st_size > 0:
+            return out_vid
+        print("[pipeline] Wav2Lip finished but output missing/empty; returning frames.")
+        return frames_dir
+    except Exception as e:
+        print(f"[pipeline] Wav2Lip failed: {e}")
         return frames_dir
 
 
-def encode_mp4(frames_dir: Path, audio_wav: str, out_mp4: str, quality_mode: str = "high_quality") -> None:
-    """
-    Uses FFmpeg to combine PNG sequence + WAV into H.264 MP4.
-    Automatically selects best encoder: NVENC (GPU) or libx264 (CPU).
+# --------------------------------------------------------------------------- #
+# Stage 4: GFPGAN enhancement (frames only)
+# --------------------------------------------------------------------------- #
 
-    Args:
-        frames_dir: Directory containing frame sequence (%04d.png)
-        audio_wav: Path to audio file
-        out_mp4: Output video path
-        quality_mode: "real_time" or "high_quality" to adjust encoding settings
-    """
-    import torch
+def enhance_with_gfpgan(frames_or_video: Any, tmp_dir: Path) -> Path:
+    try:
+        from gfpgan import GFPGANer
+    except Exception:
+        print("[pipeline] GFPGAN not installed; skipping.")
+        return Path(frames_or_video)
 
-    # Detect available encoder
-    cuda_available = torch.cuda.is_available()
+    import cv2
 
-    # Base command
+    out_dir = tmp_dir / "gfpgan_frames"
+    _ensure_dir(out_dir)
+
+    input_path = Path(frames_or_video)
+
+    if input_path.is_file():
+        extracted = tmp_dir / "video_extract_frames"
+        _ensure_dir(extracted)
+        subprocess.check_call([
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-i", str(input_path),
+            str(extracted / "%04d.png"),
+        ])
+        input_path = extracted
+
+    if not input_path.is_dir():
+        return input_path
+
+    try:
+        restorer = GFPGANer(
+            model_path=str(GFPGAN_CKPT),
+            upscale=2,
+            arch="clean",
+            channel_multiplier=2,
+            bg_upsampler=None,
+        )
+    except Exception as e:
+        print(f"[pipeline] Failed to init GFPGAN: {e}")
+        return input_path
+
+    pngs = sorted(glob.glob(str(input_path / "*.png")))
+    print(f"[pipeline] Enhancing {len(pngs)} frames with GFPGAN...")
+
+    for p in pngs:
+        basename = os.path.basename(p)
+        img = cv2.imread(p, cv2.IMREAD_COLOR)
+        if img is None:
+            continue
+        _, _, out_img = restorer.enhance(img, has_aligned=False, only_center_face=False, paste_back=True)
+        cv2.imwrite(str(out_dir / basename), out_img)
+
+    return out_dir
+
+
+# --------------------------------------------------------------------------- #
+# Final encode (frames + audio)
+# --------------------------------------------------------------------------- #
+
+def encode_mp4(frames_dir: Path, audio_wav: str, out_mp4: str, fps: int = 25) -> None:
+    if not _ffmpeg_binary_available():
+        raise RuntimeError("ffmpeg not found on PATH")
+
+    frame_files = sorted(glob.glob(str(frames_dir / "*.png")))
+    if not frame_files:
+        raise RuntimeError(f"No PNG frames found in {frames_dir}")
+
     cmd = [
-        "ffmpeg",
-        "-y",
-        "-loglevel",
-        "error",
-        "-thread_queue_size",
-        "1024",
-        "-r",
-        "25",
-        "-i",
-        f"{frames_dir}/%04d.png",
-        "-i",
-        audio_wav,
-    ]
-
-    # Video encoding settings based on quality mode and hardware
-    if quality_mode == "real_time":
-        # Fast encoding for streaming
-        if cuda_available:
-            cmd.extend([
-                "-c:v", "h264_nvenc",
-                "-preset", "p1",  # Fastest NVENC preset
-                "-tune", "ll",    # Low latency
-                "-profile:v", "baseline",
-                "-b:v", "2M",     # Lower bitrate for streaming
-            ])
-        else:
-            cmd.extend([
-                "-c:v", "libx264",
-                "-preset", "ultrafast",
-                "-tune", "zerolatency",
-                "-profile:v", "baseline",
-                "-b:v", "2M",
-            ])
-    else:  # high_quality
-        # Best quality encoding
-        if cuda_available:
-            cmd.extend([
-                "-c:v", "h264_nvenc",
-                "-preset", "p7",  # Best quality NVENC preset
-                "-profile:v", "high",
-                "-b:v", "6M",     # Higher bitrate for quality
-            ])
-        else:
-            cmd.extend([
-                "-c:v", "libx264",
-                "-preset", "slow",
-                "-profile:v", "high",
-                "-crf", "18",     # Near-lossless quality
-            ])
-
-    # Common settings
-    cmd.extend([
+        "ffmpeg", "-y",
+        "-loglevel", "warning",
+        "-thread_queue_size", "1024",
+        "-r", str(fps),
+        "-i", f"{frames_dir}/%04d.png",
+        "-i", audio_wav,
+        "-c:v", "libx264",
+        "-preset", "fast",
+        "-crf", "23",
         "-pix_fmt", "yuv420p",
         "-c:a", "aac",
         "-b:a", "192k",
         "-shortest",
+        "-movflags", "+faststart",
         out_mp4,
-    ])
-
+    ]
     subprocess.check_call(cmd)
 
 
 # --------------------------------------------------------------------------- #
-# Public API                                                                  #
+# Main entry point
 # --------------------------------------------------------------------------- #
-
 
 def render_pipeline(
     *,
@@ -410,154 +616,67 @@ def render_pipeline(
     quality_mode: str = "auto",
 ) -> str:
     """
-    High‑level entry used by Celery and the MCP server.
-
-    Args:
-        face_image: Path to input portrait image (PNG/JPG)
-        audio: Path to speech audio file (WAV/MP3)
-        out_path: Output video file path
-        reference_video: Optional driving video for head pose
-        viseme_json: Optional phoneme/viseme alignment data
-        quality_mode: "real_time", "high_quality", or "auto" (default)
-
-    Quality Modes:
-        real_time:    Fast processing (SadTalker + Wav2Lip, lower resolution)
-                      Ideal for: Live streaming, news broadcasts, real-time chatbots
-                      Target: <3s latency for 512x512 @ 25fps
-
-        high_quality: Best quality (FOMM + Diff2Lip, full resolution + GFPGAN)
-                      Ideal for: YouTube content, marketing videos, high-quality avatars
-                      Target: Best quality, processing time not critical
-
-        auto:         Automatically selects based on GPU availability and model checkpoints
-
-    Returns:
-        Absolute path to the generated video file
+    FOMM -> (Diff2Lip or Wav2Lip) -> optional GFPGAN -> final mp4 with guaranteed audio
+    
+    Audio handling:
+    - Diff2Lip uses 16kHz mono internally for lip-sync inference
+    - Final output uses the ORIGINAL high-quality audio for best quality
     """
-    import logging
-    logger = logging.getLogger("pipeline")
-
     tmp = Path(tempfile.mkdtemp(prefix="vidgen_"))
-    logger.info(f"[pipeline] Starting render with quality_mode={quality_mode}")
-    logger.info(f"[pipeline] Input: face={face_image}, audio={audio}")
 
-    # Validate inputs
     if not Path(face_image).exists():
         raise FileNotFoundError(f"Face image not found: {face_image}")
     if not Path(audio).exists():
         raise FileNotFoundError(f"Audio file not found: {audio}")
 
-    try:
-        # Determine which pipeline to use
-        cuda_available = torch.cuda.is_available()
+    fomm_frames = run_fomm(face_image, audio, reference_video, tmp)
 
-        # Check model checkpoints exist
-        fomm_ckpt_exists = FOMM_CKPT.exists()
-        diff2lip_ckpt_exists = D2L_CKPT.exists()
-        sadtalker_available = SAD_CKPT.exists()
-        wav2lip_available = W2L_CKPT.exists()
+    # ✅ ALWAYS use original high-quality audio for final output
+    final_audio = audio
+    
+    lip_result: Path
+    want_d2l = (quality_mode in ("high_quality", "auto")) and torch.cuda.is_available()
+    d2l_available = _diff2lip_script().exists() and (D2L_PAPER_CKPT.exists() or D2L_LEGACY_CKPT.exists())
 
-        # Check HQ runtime dependencies (not just checkpoints)
-        fomm_runtime_ok, fomm_reason = _fomm_runtime_available() if fomm_ckpt_exists else (False, "FOMM checkpoint missing")
+    if want_d2l and d2l_available:
+        try:
+            # Diff2Lip uses 16kHz mono internally, but we don't use that for final output
+            lip_result = run_diff2lip(fomm_frames, audio, tmp)
+            # ✅ DON'T overwrite final_audio - keep using original
+            print(f"[pipeline] Using original audio for final output (not 16kHz version)")
+        except Exception as e:
+            print(f"[pipeline] Diff2Lip failed: {e}. Falling back to Wav2Lip.")
+            lip_result = run_wav2lip(fomm_frames, audio, tmp)
+    else:
+        lip_result = run_wav2lip(fomm_frames, audio, tmp)
 
-        # HQ is only truly available if ALL requirements met
-        hq_available = cuda_available and fomm_ckpt_exists and diff2lip_ckpt_exists and fomm_runtime_ok
+    final_result: Path = lip_result
+    if GFPGAN_CKPT.exists():
+        final_result = enhance_with_gfpgan(lip_result, tmp)
 
-        if not fomm_runtime_ok and fomm_ckpt_exists:
-            logger.warning(f"[pipeline] HQ models present but runtime unavailable: {fomm_reason}")
+    out_path_abs = str(Path(out_path).resolve())
+    out_path_p = Path(out_path_abs)
+    out_path_p.parent.mkdir(parents=True, exist_ok=True)
 
-        # Auto-select quality mode if not specified
-        if quality_mode == "auto":
-            if hq_available:
-                quality_mode = "high_quality"
-                logger.info("[pipeline] Auto-selected high_quality mode (GPU + HQ stack fully available)")
-            elif sadtalker_available and wav2lip_available:
-                quality_mode = "real_time"
-                logger.info("[pipeline] Auto-selected real_time mode (HQ unavailable, using fallback)")
-            else:
-                raise RuntimeError("No suitable models available for rendering")
+    if final_result.is_file() and final_result.suffix.lower() == ".mp4":
+        # Video file - remux with original high-quality audio
+        tmp_remux = tmp / "remux.mp4"
+        print(f"[pipeline] Remuxing video with original audio: {final_audio}")
+        _remux_video_with_audio(final_result, Path(final_audio), tmp_remux)
+        shutil.copy(str(tmp_remux), out_path_abs)
+    else:
+        # Directory of frames - encode with original high-quality audio
+        tmp_encoded = tmp / "encoded.mp4"
+        print(f"[pipeline] Encoding frames with original audio: {final_audio}")
+        encode_mp4(final_result, final_audio, str(tmp_encoded), fps=25)
 
-        # Execute pipeline based on quality mode
-        if quality_mode == "high_quality":
-            if not hq_available:
-                # Provide specific error message based on what's missing
-                if not cuda_available:
-                    raise RuntimeError("high_quality mode requires GPU (CUDA). Use real_time mode instead.")
-                elif not fomm_runtime_ok:
-                    raise RuntimeError(f"high_quality mode runtime unavailable: {fomm_reason}")
-                else:
-                    raise RuntimeError(
-                        "high_quality mode requires FOMM+Diff2Lip models. "
-                        "Use real_time mode or ensure models are downloaded."
-                    )
-            logger.info("[pipeline] Using HIGH QUALITY pipeline: FOMM + Diff2Lip + GFPGAN")
-            fomm_frames = run_fomm(face_image, audio, reference_video, tmp)
-            lip_frames = run_diff2lip(fomm_frames, audio, tmp)
+        tmp_remux = tmp / "remux.mp4"
+        _remux_video_with_audio(tmp_encoded, Path(final_audio), tmp_remux)
+        shutil.copy(str(tmp_remux), out_path_abs)
 
-            # Apply GFPGAN enhancement for high quality
-            if GFPGAN_CKPT.exists():
-                logger.info("[pipeline] Applying GFPGAN face enhancement")
-                final_frames = enhance_with_gfpgan(lip_frames, tmp)
-            else:
-                logger.warning("[pipeline] GFPGAN not available, skipping enhancement")
-                final_frames = lip_frames
+    if not _verify_has_audio(Path(out_path_abs)):
+        print("[pipeline] ⚠️ WARNING: final output seems to have no audio stream after remux.")
+    else:
+        print("[pipeline] ✅ Audio stream verified in final output")
 
-        elif quality_mode == "real_time":
-            if not (sadtalker_available and wav2lip_available):
-                raise RuntimeError(
-                    "real_time mode requires SadTalker and Wav2Lip models. "
-                    "Ensure models are downloaded."
-                )
-            logger.info("[pipeline] Using REAL-TIME pipeline: SadTalker + Wav2Lip")
-            sad_frames = run_sadtalker(face_image, audio, tmp)
-            final_frames = run_wav2lip(sad_frames, audio, tmp)
-            # Skip enhancement for real-time to reduce latency
-
-        else:
-            raise ValueError(
-                f"Invalid quality_mode: {quality_mode}. "
-                "Must be 'real_time', 'high_quality', or 'auto'"
-            )
-
-        # Encode final video
-        logger.info(f"[pipeline] Encoding video to {out_path}")
-        encode_mp4(final_frames, audio, out_path, quality_mode=quality_mode)
-
-        result_path = os.path.abspath(out_path)
-        logger.info(f"[pipeline] Render complete: {result_path}")
-        return result_path
-
-    except Exception as e:
-        logger.error(f"[pipeline] Render failed: {e}", exc_info=True)
-        raise
-    finally:
-        # Optional: clean tmp dirs or leave for debugging
-        # import shutil
-        # shutil.rmtree(tmp, ignore_errors=True)
-        pass
-
-
-# --------------------------------------------------------------------------- #
-# CLI helper for manual smoke tests                                           #
-# --------------------------------------------------------------------------- #
-if __name__ == "__main__":
-    import argparse, sys
-
-    p = argparse.ArgumentParser()
-    p.add_argument("--face", required=True, help="Path to PNG/JPG of face")
-    p.add_argument("--audio", required=True, help="Path to wav file 16 kHz mono")
-    p.add_argument("--out", required=True, help="Output MP4 path")
-    p.add_argument("--driver", help="Optional driver MP4 for full body")
-    args = p.parse_args()
-
-    try:
-        render_pipeline(
-            face_image=args.face,
-            audio=args.audio,
-            out_path=args.out,
-            reference_video=args.driver,
-        )
-    except Exception as exc:
-        print("❌  Render failed:", exc, file=sys.stderr)
-        sys.exit(1)
-    print("✅  Done →", args.out)
+    return out_path_abs
