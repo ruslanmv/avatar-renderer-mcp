@@ -45,11 +45,11 @@ except ImportError:
 def _resolve_model_root() -> Path:
     env = os.environ.get("MODEL_ROOT")
     if env:
-        return Path(env)
+        return Path(env).resolve()
     cwd = Path.cwd()
     if (cwd / "pyproject.toml").exists() or (cwd / "Makefile").exists():
-        return cwd / "models"
-    return Path("/models")
+        return (cwd / "models").resolve()
+    return Path("/models").resolve()
 
 
 MODEL_ROOT = _resolve_model_root()
@@ -59,7 +59,7 @@ D2L_CKPT    = MODEL_ROOT / "diff2lip" / "Diff2Lip.pth"
 W2L_CKPT    = MODEL_ROOT / "wav2lip" / "wav2lip_gan.pth"
 GFPGAN_CKPT = MODEL_ROOT / "gfpgan" / "GFPGANv1.3.pth"
 
-EXT_DEPS_DIR = Path(os.environ.get("EXT_DEPS_DIR", "external_deps"))
+EXT_DEPS_DIR = Path(os.environ.get("EXT_DEPS_DIR", "external_deps")).resolve()
 
 # --------------------------------------------------------------------------- #
 # Helpers
@@ -97,25 +97,55 @@ def load_module_from_path(module_name: str, file_path: Path) -> Any:
 
 def _create_mpi_mock(target_dir: Path) -> Path:
     """
-    Creates a fake mpi4py module so Diff2Lip doesn't crash on import.
-    (Some forks import mpi4py even for single-GPU inference.)
-    """
-    target_dir.mkdir(parents=True, exist_ok=True)
-    mpi_file = target_dir / "mpi4py.py"
-    if not mpi_file.exists():
-        mpi_file.write_text(
-            """
-class MPI_Mock:
-    def __getattr__(self, name):
-        return self
-    def Get_rank(self): return 0
-    def Get_size(self): return 1
-    def Barrier(self): pass
+    Create a *package-style* mpi4py mock that satisfies Diff2Lip guided_diffusion/dist_util.py.
 
-MPI = MPI_Mock()
-COMM_WORLD = MPI_Mock()
+    dist_util expects:
+      from mpi4py import MPI
+      comm = MPI.COMM_WORLD
+      comm.bcast(...)
+      comm.rank / comm.size
+      comm.Barrier()
+      (sometimes Get_rank/Get_size too)
+
+    We provide a minimal single-process communicator.
+    """
+    target_dir = target_dir.resolve()
+    pkg_dir = target_dir / "mpi4py"
+    pkg_dir.mkdir(parents=True, exist_ok=True)
+
+    init_py = pkg_dir / "__init__.py"
+    if not init_py.exists():
+        init_py.write_text(
+            r"""
+# Minimal mpi4py mock for single-process inference
+class _CommWorld:
+    def __init__(self):
+        self.rank = 0
+        self.size = 1
+
+    def Get_rank(self):
+        return 0
+
+    def Get_size(self):
+        return 1
+
+    def bcast(self, obj, root=0):
+        return obj
+
+    def Barrier(self):
+        return None
+
+class _MPI:
+    COMM_WORLD = _CommWorld()
+
+    @staticmethod
+    def Get_processor_name():
+        return "localhost"
+
+MPI = _MPI()
 """.lstrip()
         )
+
     return target_dir
 
 
@@ -275,52 +305,60 @@ def run_wav2lip(frames_dir: Path, audio_wav: str, tmp_dir: Path) -> Path:
 
 def run_diff2lip(frames_dir: Path, audio_wav: str, tmp_dir: Path) -> Path:
     """
-    Run Diff2Lip (HQ) correctly for the zip version you posted.
+    Run Diff2Lip (HQ) for the zip version you posted.
 
-    FIXES:
-      - Do NOT use the broken shim CLI (--face/--audio/--outfile) because generate.py
-        from the zip expects --video_path/--audio_path/--out_path/--model_path, etc.
-      - Force the correct guided-diffusion (Diff2Lip's bundled guided-diffusion),
-        otherwise Python may import external_deps/guided-diffusion which lacks tfg_*.
-      - Use cwd=Diff2Lip root so relative paths like configs/... resolve safely.
-      - If output mp4 is silent, mux audio in.
+    Critical fixes:
+      - Use Diff2Lip's generate.py CLI (--video_path/--audio_path/--out_path/--model_path)
+      - Force Diff2Lip bundled guided-diffusion first in PYTHONPATH
+      - Provide a real-ish mpi4py mock (COMM_WORLD.rank/size + bcast)
+      - Set single-process dist env vars to keep torch.distributed happy
+      - Use cwd=Diff2Lip root so relative paths resolve
     """
-    d2l_root = EXT_DEPS_DIR / "Diff2Lip"
-    generate_py = d2l_root / "generate.py"
+    d2l_root = (EXT_DEPS_DIR / "Diff2Lip").resolve()
+    generate_py = (d2l_root / "generate.py").resolve()
     if not generate_py.exists():
         print("[pipeline] Diff2Lip generate.py missing. Falling back to Wav2Lip.")
         return run_wav2lip(frames_dir, audio_wav, tmp_dir)
 
     # Diff2Lip wants a VIDEO input: convert frames -> silent mp4
-    d2l_in_video = tmp_dir / "d2l_input.mp4"
+    d2l_in_video = (tmp_dir / "d2l_input.mp4").resolve()
     _make_silent_video(frames_dir, d2l_in_video)
 
-    out_dir = tmp_dir / "d2l_out"
+    out_dir = (tmp_dir / "d2l_out").resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_mp4 = out_dir / "result.mp4"
+    out_mp4 = (out_dir / "result.mp4").resolve()
 
     # Build environment to guarantee correct imports
     env = os.environ.copy()
     current_pp = env.get("PYTHONPATH", "")
 
-    mock_dir = _create_mpi_mock(tmp_dir / "mock_libs")
+    # Good mpi4py mock (package)
+    mock_root = _create_mpi_mock((tmp_dir / "mock_libs").resolve())
 
-    # IMPORTANT: prefer Diff2Lip bundled guided-diffusion
-    bundled_gd = d2l_root / "guided-diffusion"
-    python_path_list = [str(mock_dir.resolve())]
+    # Prefer Diff2Lip bundled guided-diffusion (this is the one with tfg_* APIs)
+    bundled_gd = (d2l_root / "guided-diffusion").resolve()
 
-    if bundled_gd.exists():
-        python_path_list.append(str(bundled_gd.resolve()))
-    python_path_list.append(str(d2l_root.resolve()))
+    python_path_list = [
+        str(mock_root),                     # contains mpi4py package
+        str(bundled_gd) if bundled_gd.exists() else "",
+        str(d2l_root),
+    ]
+    python_path_list = [p for p in python_path_list if p]
 
     env["PYTHONPATH"] = f"{os.pathsep.join(python_path_list)}{os.pathsep}{current_pp}"
 
-    # generate.py arguments (zip version)
+    # Force single-process "distributed" settings
+    env.setdefault("RANK", "0")
+    env.setdefault("WORLD_SIZE", "1")
+    env.setdefault("LOCAL_RANK", "0")
+    env.setdefault("MASTER_ADDR", "127.0.0.1")
+    env.setdefault("MASTER_PORT", "29500")
+
     cmd = [
         sys.executable, str(generate_py),
-        "--model_path", str(D2L_CKPT),
+        "--model_path", str(D2L_CKPT.resolve()),
         "--video_path", str(d2l_in_video),
-        "--audio_path", str(audio_wav),
+        "--audio_path", str(Path(audio_wav).resolve()),
         "--out_path", str(out_mp4),
         "--sample_path", str(out_dir),
         "--save_orig", "False",
@@ -337,10 +375,10 @@ def run_diff2lip(frames_dir: Path, audio_wav: str, tmp_dir: Path) -> Path:
         print("[pipeline] Diff2Lip finished but result.mp4 missing/empty. Falling back to Wav2Lip.")
         return run_wav2lip(frames_dir, audio_wav, tmp_dir)
 
-    # Some environments produce silent mp4 with torchvision; enforce mux if needed
+    # Some envs produce silent mp4 with torchvision; enforce mux if needed
     if not _video_has_audio(out_mp4):
         print("[pipeline] Diff2Lip result.mp4 has NO audio. Muxing audio in...")
-        muxed = out_dir / "result_with_audio.mp4"
+        muxed = (out_dir / "result_with_audio.mp4").resolve()
         _mux_audio_into_video(out_mp4, audio_wav, muxed)
         return muxed
 
