@@ -26,6 +26,18 @@ from .settings import Settings  # pydantic‑based env loader
 
 settings = Settings()
 
+# ─────────────────── TTS imports ───────────────────────────────────────── #
+try:
+    from .tts.chatterbox_client import (
+        ChatterboxTtsError,
+        tts_wav_bytes_async,
+        tts_wav_base64_async,
+        chatterbox_health_async,
+    )
+    tts_available = True
+except ImportError:
+    tts_available = False
+
 # ─────────────────── Celery optional ────────────────────────────────────── #
 celery_available = False
 try:
@@ -82,6 +94,24 @@ class RenderBody(BaseModel):
             "'high_quality' for best results (FOMM+Diff2Lip+GFPGAN), or 'auto' to choose automatically"
         )
     )
+
+
+class TextToAudioRequest(BaseModel):
+    text: str = Field(..., description="Text to synthesize into speech")
+    voice: Optional[str] = Field(None, description="Voice profile: 'female', 'male', or 'neutral'")
+    language: Optional[str] = Field(None, description="Language code (ISO 639-1, e.g., 'en', 'it', 'fr')")
+    temperature: Optional[float] = Field(0.7, description="Temperature for TTS generation (0.0-1.0)", ge=0.0, le=1.0)
+    cfg_weight: Optional[float] = Field(0.4, description="CFG weight for TTS generation (0.0-1.0)", ge=0.0, le=1.0)
+    exaggeration: Optional[float] = Field(0.3, description="Exaggeration for TTS generation (0.0-1.0)", ge=0.0, le=1.0)
+    speed: Optional[float] = Field(1.0, description="Speed for TTS generation (0.5-2.0)", ge=0.5, le=2.0)
+    output_format: Optional[str] = Field("file", description="Output format: 'file' (WAV file) or 'base64' (base64-encoded WAV)")
+
+
+class TextToAudioResponse(BaseModel):
+    status: str = Field(..., description="Status of the request ('success' or 'error')")
+    audio_path: Optional[str] = Field(None, description="Path to the generated WAV file (if output_format='file')")
+    audio_base64: Optional[str] = Field(None, description="Base64-encoded WAV audio (if output_format='base64')")
+    error: Optional[str] = Field(None, description="Error message (if status='error')")
 
 
 # ───────────────────────── Celery vs Thread task ─────────────────────────── #
@@ -230,6 +260,85 @@ def get_status(job_id: str):
         return {"state": state}
 
 
+# ─────────────────────── Text-to-Audio endpoint ────────────────────────────── #
+@app.post("/text-to-audio", response_model=TextToAudioResponse)
+async def text_to_audio(body: TextToAudioRequest):
+    """
+    Convert text to speech using the Chatterbox TTS service.
+
+    This endpoint generates audio from text and returns either:
+    - A WAV file path (if output_format='file')
+    - Base64-encoded WAV audio (if output_format='base64')
+
+    The generated audio can be used with the avatar rendering pipeline.
+    """
+    if not tts_available:
+        raise HTTPException(
+            503,
+            "TTS service is not available. Please check the Chatterbox TTS server configuration."
+        )
+
+    try:
+        # Determine output format
+        output_format = body.output_format or "file"
+
+        # Get voice and language (use defaults from settings if not specified)
+        voice = body.voice or settings.CHATTERBOX_DEFAULT_VOICE
+        language = body.language or settings.CHATTERBOX_DEFAULT_LANGUAGE
+
+        if output_format == "base64":
+            # Return base64-encoded WAV
+            audio_base64 = await tts_wav_base64_async(
+                body.text,
+                voice=voice,
+                language=language,
+                temperature=body.temperature or 0.7,
+                cfg_weight=body.cfg_weight or 0.4,
+                exaggeration=body.exaggeration or 0.3,
+                speed=body.speed or 1.0,
+            )
+
+            return TextToAudioResponse(
+                status="success",
+                audio_base64=audio_base64,
+            )
+        else:
+            # Generate WAV and save to file
+            wav_bytes = await tts_wav_bytes_async(
+                body.text,
+                voice=voice,
+                language=language,
+                temperature=body.temperature or 0.7,
+                cfg_weight=body.cfg_weight or 0.4,
+                exaggeration=body.exaggeration or 0.3,
+                speed=body.speed or 1.0,
+            )
+
+            # Save to a file in the work directory
+            audio_id = str(uuid.uuid4())
+            audio_dir = WORK_ROOT / f"tts-{audio_id}"
+            audio_dir.mkdir(parents=True, exist_ok=True)
+            audio_path = audio_dir / "audio.wav"
+
+            audio_path.write_bytes(wav_bytes)
+
+            return TextToAudioResponse(
+                status="success",
+                audio_path=str(audio_path),
+            )
+
+    except ChatterboxTtsError as exc:
+        return TextToAudioResponse(
+            status="error",
+            error=f"TTS generation failed: {str(exc)}",
+        )
+    except Exception as exc:
+        return TextToAudioResponse(
+            status="error",
+            error=f"Unexpected error: {str(exc)}",
+        )
+
+
 # ────────────────────── Health & Readiness probes ────────────────────────── #
 @app.get("/health/live")
 def liveness():
@@ -244,6 +353,34 @@ def readiness():
         except Exception as err:
             raise HTTPException(503, f"celery ping failed: {err}") from err
     return JSONResponse({"status": "ready"})
+
+
+@app.get("/health/tts")
+async def tts_health():
+    """Check the health of the Chatterbox TTS service."""
+    if not tts_available:
+        raise HTTPException(
+            503,
+            "TTS service is not available. TTS module could not be imported."
+        )
+
+    try:
+        health_status = await chatterbox_health_async()
+        return JSONResponse({
+            "status": "healthy",
+            "tts_server": settings.CHATTERBOX_URL,
+            "details": health_status,
+        })
+    except ChatterboxTtsError as exc:
+        raise HTTPException(
+            503,
+            f"TTS health check failed: {str(exc)}"
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            503,
+            f"Unexpected TTS health check error: {str(exc)}"
+        ) from exc
 
 
 @app.get("/avatars")
@@ -334,7 +471,8 @@ def list_avatars():
             "cuda_available": cuda_available,
             "gpu_count": gpu_count,
             "gpus": gpu_info,
-            "celery_enabled": celery_available
+            "celery_enabled": celery_available,
+            "tts_enabled": tts_available
         },
         "rendering_modes": {
             "high_quality": {
@@ -347,5 +485,12 @@ def list_avatars():
                 "description": "SadTalker + Wav2Lip pipeline for faster processing",
                 "models": ["sadtalker", "wav2lip", "gfpgan"]
             }
+        },
+        "tts": {
+            "available": tts_available,
+            "server_url": settings.CHATTERBOX_URL if tts_available else None,
+            "default_voice": settings.CHATTERBOX_DEFAULT_VOICE if tts_available else None,
+            "default_language": settings.CHATTERBOX_DEFAULT_LANGUAGE if tts_available else None,
+            "description": "Chatterbox TTS for text-to-speech synthesis"
         }
     })

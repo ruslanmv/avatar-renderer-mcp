@@ -70,6 +70,10 @@ class Settings(BaseSettings):
         FFMPEG_BIN: Path to FFmpeg binary for video encoding.
         MCP_ENABLE: Whether to enable the MCP STDIO server.
         MCP_TOOL_NAME: Tool name advertised to MCP Gateway.
+        CHATTERBOX_URL: URL of the Chatterbox TTS server.
+        CHATTERBOX_TIMEOUT: Timeout for Chatterbox TTS requests in seconds.
+        CHATTERBOX_DEFAULT_VOICE: Default voice for TTS (female, male, neutral).
+        CHATTERBOX_DEFAULT_LANGUAGE: Default language for TTS (ISO 639-1 code).
     """
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -188,6 +192,32 @@ class Settings(BaseSettings):
     MCP_TOOL_NAME: str = Field(
         default="avatar_renderer",
         description="Tool name advertised to the MCP Gateway for service discovery",
+    )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TTS (Text-to-Speech) Configuration
+    # ─────────────────────────────────────────────────────────────────────────
+
+    CHATTERBOX_URL: str = Field(
+        default="http://localhost:4123",
+        description="URL of the Chatterbox TTS server for text-to-speech synthesis",
+    )
+
+    CHATTERBOX_TIMEOUT: float = Field(
+        default=30.0,
+        description="Timeout in seconds for Chatterbox TTS requests",
+        ge=1.0,
+        le=300.0,
+    )
+
+    CHATTERBOX_DEFAULT_VOICE: str = Field(
+        default="female",
+        description="Default voice for TTS synthesis (female, male, or neutral)",
+    )
+
+    CHATTERBOX_DEFAULT_LANGUAGE: str = Field(
+        default="en",
+        description="Default language for TTS synthesis (ISO 639-1 code, e.g., 'en', 'it', 'fr')",
     )
 
     # ─────────────────────────────────────────────────────────────────────────

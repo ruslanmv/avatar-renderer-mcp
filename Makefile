@@ -410,6 +410,50 @@ demo: install ## Run demo script
 		EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
 		$(VENV_BIN)/python demo.py
 
+.PHONY: gui
+gui: install ## Start backend and launch GUI
+	@printf "$(BOLD)$(BLUE)Starting Avatar Renderer GUI...$(RESET)\n\n"
+	@printf "$(BLUE)Step 1: Starting backend server...$(RESET)\n"
+	@# Start backend in background
+	@PYTHONPATH=$(CURDIR)/$(EXT_DEPS_DIR):$(PYTHONPATH) \
+		MODEL_ROOT=$(MODELS_DIR) \
+		EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
+		$(VENV_BIN)/uvicorn app.api:app --host 0.0.0.0 --port 8000 > /tmp/avatar-backend.log 2>&1 & \
+		echo $$! > /tmp/avatar-backend.pid
+	@printf "$(GREEN)✓ Backend started (PID: $$(cat /tmp/avatar-backend.pid))$(RESET)\n"
+	@printf "$(BLUE)Step 2: Waiting for backend to be ready...$(RESET)\n"
+	@# Wait for backend to be healthy
+	@for i in {1..30}; do \
+		if curl -s http://localhost:8000/health/live > /dev/null 2>&1; then \
+			printf "$(GREEN)✓ Backend is ready!$(RESET)\n"; \
+			break; \
+		fi; \
+		printf "."; \
+		sleep 1; \
+		if [ $$i -eq 30 ]; then \
+			printf "\n$(RED)✗ Backend failed to start after 30 seconds$(RESET)\n"; \
+			printf "$(YELLOW)Check logs: tail -f /tmp/avatar-backend.log$(RESET)\n"; \
+			kill $$(cat /tmp/avatar-backend.pid) 2>/dev/null || true; \
+			rm -f /tmp/avatar-backend.pid; \
+			exit 1; \
+		fi; \
+	done
+	@printf "$(BLUE)Step 3: Launching GUI...$(RESET)\n\n"
+	@# Launch GUI (this will block until GUI is closed)
+	@PYTHONPATH=$(CURDIR)/$(EXT_DEPS_DIR):$(PYTHONPATH) \
+		MODEL_ROOT=$(MODELS_DIR) \
+		EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
+		API_URL=http://localhost:8000 \
+		$(VENV_BIN)/python -m gui || true
+	@# Cleanup: Stop backend when GUI exits
+	@printf "\n$(BLUE)Stopping backend server...$(RESET)\n"
+	@if [ -f /tmp/avatar-backend.pid ]; then \
+		kill $$(cat /tmp/avatar-backend.pid) 2>/dev/null || true; \
+		rm -f /tmp/avatar-backend.pid; \
+		printf "$(GREEN)✓ Backend stopped$(RESET)\n"; \
+	fi
+	@printf "$(GREEN)$(BOLD)✓ GUI session complete$(RESET)\n"
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Tests
 # ─────────────────────────────────────────────────────────────────────────────
