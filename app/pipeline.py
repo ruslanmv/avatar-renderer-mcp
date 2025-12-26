@@ -159,6 +159,7 @@ def _remux_video_with_audio(video_in: Path, audio_in: Path, out_mp4: Path) -> No
     """
     ALWAYS remux final output to guarantee audio exists.
     Keeps video stream as-is and encodes audio to AAC.
+    Audio duration is preserved (not truncated to video length).
     """
     cmd = [
         "ffmpeg", "-y", "-loglevel", "warning",
@@ -169,7 +170,6 @@ def _remux_video_with_audio(video_in: Path, audio_in: Path, out_mp4: Path) -> No
         "-c:v", "copy",
         "-c:a", "aac",
         "-b:a", "192k",
-        "-shortest",
         "-movflags", "+faststart",
         str(out_mp4),
     ]
@@ -575,6 +575,10 @@ def enhance_with_gfpgan(frames_or_video: Any, tmp_dir: Path) -> Path:
 # --------------------------------------------------------------------------- #
 
 def encode_mp4(frames_dir: Path, audio_wav: str, out_mp4: str, fps: int = 25) -> None:
+    """
+    Encode frames to MP4 with audio.
+    Audio duration is preserved (video extends last frame if needed).
+    """
     if not _ffmpeg_binary_available():
         raise RuntimeError("ffmpeg not found on PATH")
 
@@ -595,9 +599,8 @@ def encode_mp4(frames_dir: Path, audio_wav: str, out_mp4: str, fps: int = 25) ->
         "-pix_fmt", "yuv420p",
         "-c:a", "aac",
         "-b:a", "192k",
-        "-shortest",
         "-movflags", "+faststart",
-        out_mp4,
+        str(out_mp4),
     ]
     subprocess.check_call(cmd)
 
@@ -614,10 +617,20 @@ def render_pipeline(
     reference_video: Optional[str] = None,
     viseme_json: Optional[str] = None,
     quality_mode: str = "auto",
+    force_wav2lip: bool = False,
 ) -> str:
     """
     FOMM -> (Diff2Lip or Wav2Lip) -> optional GFPGAN -> final mp4 with guaranteed audio
-    
+
+    Args:
+        face_image: Path to portrait image
+        audio: Path to audio file
+        out_path: Output video path
+        reference_video: Optional reference video for motion
+        viseme_json: Optional viseme data (currently unused)
+        quality_mode: Quality mode (auto, real_time, high_quality)
+        force_wav2lip: If True, use Wav2Lip instead of Diff2Lip regardless of quality_mode
+
     Audio handling:
     - Diff2Lip uses 16kHz mono internally for lip-sync inference
     - Final output uses the ORIGINAL high-quality audio for best quality
@@ -633,22 +646,28 @@ def render_pipeline(
 
     # ✅ ALWAYS use original high-quality audio for final output
     final_audio = audio
-    
-    lip_result: Path
-    want_d2l = (quality_mode in ("high_quality", "auto")) and torch.cuda.is_available()
-    d2l_available = _diff2lip_script().exists() and (D2L_PAPER_CKPT.exists() or D2L_LEGACY_CKPT.exists())
 
-    if want_d2l and d2l_available:
-        try:
-            # Diff2Lip uses 16kHz mono internally, but we don't use that for final output
-            lip_result = run_diff2lip(fomm_frames, audio, tmp)
-            # ✅ DON'T overwrite final_audio - keep using original
-            print(f"[pipeline] Using original audio for final output (not 16kHz version)")
-        except Exception as e:
-            print(f"[pipeline] Diff2Lip failed: {e}. Falling back to Wav2Lip.")
-            lip_result = run_wav2lip(fomm_frames, audio, tmp)
-    else:
+    lip_result: Path
+
+    # Decide which lip-sync method to use
+    if force_wav2lip:
+        print("[pipeline] Wav2Lip forced via --wav2lip flag")
         lip_result = run_wav2lip(fomm_frames, audio, tmp)
+    else:
+        want_d2l = (quality_mode in ("high_quality", "auto")) and torch.cuda.is_available()
+        d2l_available = _diff2lip_script().exists() and (D2L_PAPER_CKPT.exists() or D2L_LEGACY_CKPT.exists())
+
+        if want_d2l and d2l_available:
+            try:
+                # Diff2Lip uses 16kHz mono internally, but we don't use that for final output
+                lip_result = run_diff2lip(fomm_frames, audio, tmp)
+                # ✅ DON'T overwrite final_audio - keep using original
+                print(f"[pipeline] Using original audio for final output (not 16kHz version)")
+            except Exception as e:
+                print(f"[pipeline] Diff2Lip failed: {e}. Falling back to Wav2Lip.")
+                lip_result = run_wav2lip(fomm_frames, audio, tmp)
+        else:
+            lip_result = run_wav2lip(fomm_frames, audio, tmp)
 
     final_result: Path = lip_result
     if GFPGAN_CKPT.exists():
@@ -666,13 +685,8 @@ def render_pipeline(
         shutil.copy(str(tmp_remux), out_path_abs)
     else:
         # Directory of frames - encode with original high-quality audio
-        tmp_encoded = tmp / "encoded.mp4"
         print(f"[pipeline] Encoding frames with original audio: {final_audio}")
-        encode_mp4(final_result, final_audio, str(tmp_encoded), fps=25)
-
-        tmp_remux = tmp / "remux.mp4"
-        _remux_video_with_audio(tmp_encoded, Path(final_audio), tmp_remux)
-        shutil.copy(str(tmp_remux), out_path_abs)
+        encode_mp4(final_result, final_audio, str(out_path_abs), fps=25)
 
     if not _verify_has_audio(Path(out_path_abs)):
         print("[pipeline] ⚠️ WARNING: final output seems to have no audio stream after remux.")

@@ -9,11 +9,13 @@ Examples:
   python demo.py --image tests/assets/alice.png --audio tests/assets/hello.wav --out demo.mp4 --quality auto
   python demo.py --quality real_time
   python demo.py --quality high_quality
+  python demo.py --wav2lip  # Force Wav2Lip instead of Diff2Lip
 
 Notes:
   - Download models:        make download-models
   - Install external deps:  make install-git-deps
   - Ensure ffmpeg exists:   ffmpeg -version
+  - By default, Diff2Lip is used for high quality. Use --wav2lip to force Wav2Lip method.
 """
 
 from __future__ import annotations
@@ -47,12 +49,13 @@ def print_asset(label: str, path: Path) -> None:
     print(f"  ✅ {label}: {path} ({size})")
 
 
-def generate_video(image_path: Path, audio_path: Path, output_path: Path, quality_mode: str) -> Path:
+def generate_video(image_path: Path, audio_path: Path, output_path: Path, quality_mode: str, force_wav2lip: bool = False) -> Path:
     print("🎬 Generating avatar video...")
     print(f"  Image:  {image_path}")
     print(f"  Audio:  {audio_path}")
     print(f"  Output: {output_path}")
     print(f"  Quality: {quality_mode}")
+    print(f"  Lip-sync: {'Wav2Lip (forced)' if force_wav2lip else 'Auto (Diff2Lip/Wav2Lip)'}")
     print()
     print("⏳ Processing...\n")
 
@@ -65,6 +68,7 @@ def generate_video(image_path: Path, audio_path: Path, output_path: Path, qualit
         audio=str(audio_path.resolve()),
         out_path=str(output_path.resolve()),
         quality_mode=quality_mode,
+        force_wav2lip=force_wav2lip,
     )
 
     elapsed = time.time() - start_time
@@ -90,6 +94,8 @@ def build_argparser() -> argparse.ArgumentParser:
                    help="Output mp4 path")
     p.add_argument("--quality", default="auto", choices=["auto", "real_time", "high_quality"],
                    help="Quality mode")
+    p.add_argument("--wav2lip", action="store_true",
+                   help="Force use of Wav2Lip instead of Diff2Lip for lip-sync")
     return p
 
 
@@ -117,7 +123,7 @@ def main() -> int:
     print()
 
     try:
-        result = generate_video(args.image, args.audio, args.out, args.quality)
+        result = generate_video(args.image, args.audio, args.out, args.quality, args.wav2lip)
     except Exception as e:
         print("\n" + "=" * 60)
         print("❌ Demo Failed")
