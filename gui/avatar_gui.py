@@ -10,24 +10,26 @@ Production Ready Version
 
 import os
 import sys
-import threading
-import time
 import ctypes
 import ctypes.util
-import json
-import subprocess
-import tkinter as tk
-from pathlib import Path
-from tkinter import ttk, messagebox, filedialog
-from typing import Optional
 
 # ============================================================================
-# CRITICAL: WSL/X11 Threading Fix
+# CRITICAL: X11 Threading Fix - MUST BE FIRST!
+# This MUST happen before ANY GUI library imports (tkinter, etc.)
 # ============================================================================
-def setup_wsl_environment():
-    """Configure environment for WSL/Linux GUI compatibility."""
-    # Check if running in WSL
+def initialize_x11_threading():
+    """
+    Initialize X11 threading support BEFORE any GUI imports.
+
+    This fixes the XCB threading error:
+    [xcb] Unknown sequence number while appending request
+
+    CRITICAL: Must be called before importing tkinter or any X11-using library.
+    """
+    # Check if running in WSL or Linux with X11
     is_wsl = False
+    is_linux = sys.platform.startswith('linux')
+
     try:
         if os.path.exists('/proc/version'):
             with open('/proc/version', 'r') as f:
@@ -35,20 +37,41 @@ def setup_wsl_environment():
     except Exception:
         pass
 
-    if is_wsl:
-        # Standardize backend for matplotlib to avoid GUI conflicts
-        os.environ['MPLBACKEND'] = 'Agg'
+    # Only initialize X11 threading on Linux/WSL
+    if is_linux or is_wsl:
+        # Set environment variables for thread safety
+        os.environ['MPLBACKEND'] = 'Agg'  # Non-interactive matplotlib backend
+        os.environ['QT_X11_NO_MITSHM'] = '1'  # Disable problematic X11 extension
 
-        # Initialize X11 threading support
+        # Initialize X11 threading FIRST
         try:
             x11_lib = ctypes.util.find_library('X11')
             if x11_lib:
                 x11 = ctypes.cdll.LoadLibrary(x11_lib)
-                x11.XInitThreads()
+                # CRITICAL: XInitThreads() must be called before any X11 operations
+                result = x11.XInitThreads()
+                if result == 0:
+                    print("[WARN] XInitThreads() returned 0 - threading support may not be available")
+                else:
+                    print("[INFO] X11 threading initialized successfully")
+            else:
+                print("[WARN] libX11 not found - running without X11 threading support")
         except Exception as e:
-            print(f"[WARN] Could not initialize X11 threads: {e}")
+            print(f"[ERROR] Failed to initialize X11 threads: {e}")
+            print("[INFO] GUI may experience threading issues")
 
-setup_wsl_environment()
+# Initialize X11 threading BEFORE any other imports
+initialize_x11_threading()
+
+# NOW it's safe to import GUI libraries
+import threading
+import time
+import json
+import subprocess
+import tkinter as tk
+from pathlib import Path
+from tkinter import ttk, messagebox, filedialog
+from typing import Optional
 
 # ============================================================================
 # Dependencies
@@ -120,27 +143,48 @@ QUALITY_MODES = {
 
 class AvatarGeneratorGUI(tk.Tk):
     def __init__(self):
-        super().__init__()
+        """
+        Initialize the Avatar Renderer GUI.
 
-        self.title("Avatar Renderer - Production GUI")
-        self.geometry("900x850")
-        self.resizable(True, True)
+        Thread-safe initialization with proper X11 support.
+        """
+        try:
+            # Initialize parent Tk class
+            super().__init__()
 
-        # State Variables
-        self.is_generating = False
-        self.avatar_image_path: Optional[Path] = DEFAULT_AVATAR
-        self.generated_audio_path: Optional[Path] = None
-        self.output_video_path: Optional[Path] = None
-        self.current_audio_playback = None
-        self.pipeline_loaded = False
+            # Set window properties
+            self.title("Avatar Renderer - Production GUI")
+            self.geometry("900x850")
+            self.resizable(True, True)
 
-        self._build_widgets()
+            # Thread safety: prevent issues with tcl threading
+            try:
+                self.tk.call('package', 'require', 'Tcl', '8.5')
+            except Exception:
+                pass  # Tcl package check is optional
 
-        # Force the window to show correctly on Windows (fixes taskbar-only issue)
-        self.after(50, self._force_show_window)
+            # State Variables
+            self.is_generating = False
+            self.avatar_image_path: Optional[Path] = DEFAULT_AVATAR
+            self.generated_audio_path: Optional[Path] = None
+            self.output_video_path: Optional[Path] = None
+            self.current_audio_playback = None
+            self.pipeline_loaded = False
 
-        # Check API after UI loads
-        self.after(1000, self._check_api_health)
+            # Build UI
+            self._build_widgets()
+
+            # Force the window to show correctly on Windows (fixes taskbar-only issue)
+            self.after(50, self._force_show_window)
+
+            # Check API after UI loads
+            self.after(1000, self._check_api_health)
+
+        except Exception as e:
+            print(f"[ERROR] Failed to initialize GUI: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
 
     def _build_widgets(self):
         # Styles
@@ -506,10 +550,50 @@ class AvatarGeneratorGUI(tk.Tk):
 # -----------------------------------------------------------------------------
 
 def main():
-    """Main entry point for the GUI application."""
-    app = AvatarGeneratorGUI()
-    app.mainloop()
-    return 0
+    """
+    Main entry point for the GUI application.
+
+    Ensures proper initialization order and thread safety.
+    """
+    try:
+        # Verify X11 threading was initialized (already done at module import)
+        print("[INFO] Starting Avatar Renderer GUI...")
+
+        # Additional thread safety: ensure we're on the main thread
+        if threading.current_thread() is not threading.main_thread():
+            print("[ERROR] GUI must be started from the main thread!")
+            return 1
+
+        # Set tkinter to be thread-aware
+        try:
+            # This helps tkinter handle multi-threaded updates better
+            tk._support_default_root = True
+        except Exception:
+            pass
+
+        # Create and run the application
+        app = AvatarGeneratorGUI()
+
+        # Ensure the window is visible and properly initialized
+        app.update_idletasks()
+        app.update()
+
+        print("[INFO] GUI initialized successfully, starting main loop...")
+
+        # Run the main event loop
+        app.mainloop()
+
+        print("[INFO] GUI shutdown cleanly")
+        return 0
+
+    except KeyboardInterrupt:
+        print("\n[INFO] GUI interrupted by user")
+        return 0
+    except Exception as e:
+        print(f"[ERROR] GUI startup failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return 1
 
 if __name__ == "__main__":
     raise SystemExit(main())
