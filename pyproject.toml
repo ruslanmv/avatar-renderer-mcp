@@ -67,6 +67,7 @@ dependencies = [
 
     # CRITICAL FIX: Numpy must be <2.0.0 for compatibility with old libraries
     "numpy<2.0.0",
+    "av>=16.0.1",
 
     # Image processing (CRITICAL: Required by FOMM, Wav2Lip, Diff2Lip)
     "opencv-python>=4.8.0,<5.0.0",
