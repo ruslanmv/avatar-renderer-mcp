@@ -22,6 +22,8 @@ WAV2LIP_REPO   ?= https://github.com/Rudrabha/Wav2Lip.git
 DIFF2LIP_REPO  ?= https://github.com/soumik-kanad/diff2lip.git
 GUIDED_DIFFUSION_REPO ?= https://github.com/openai/guided-diffusion.git
 
+# OS detection
+UNAME_S := $(shell uname -s)
 
 # Colors
 GREEN := \033[0;32m
@@ -68,6 +70,33 @@ venv: verify-uv ## Create venv if missing
 		$(UV) venv $(VENV_DIR) --python $(PYTHON); \
 	fi
 	@printf "$(GREEN)✓ venv ready: $(VENV_DIR)$(RESET)\n"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Launcher prerequisite: Chromium on Linux (for Eel)
+# ─────────────────────────────────────────────────────────────────────────────
+.PHONY: install-chromium-linux
+install-chromium-linux: ## Install Chromium if on Linux and missing (Debian/Ubuntu via apt)
+	@if [ "$(UNAME_S)" = "Linux" ]; then \
+		if command -v chromium >/dev/null 2>&1 || command -v chromium-browser >/dev/null 2>&1; then \
+			printf "$(GREEN)✓ Chromium already installed$(RESET)\n"; \
+		else \
+			printf "$(YELLOW)⚠ Chromium not found. Launcher (Eel) requires Chromium/Chrome.$(RESET)\n"; \
+			if command -v apt-get >/dev/null 2>&1; then \
+				printf "$(BLUE)→ Installing Chromium via apt...$(RESET)\n"; \
+				sudo apt update; \
+				( sudo apt install -y chromium-browser ) || ( sudo apt install -y chromium ); \
+				if command -v chromium >/dev/null 2>&1 || command -v chromium-browser >/dev/null 2>&1; then \
+					printf "$(GREEN)✓ Chromium installed successfully$(RESET)\n"; \
+				else \
+					printf "$(RED)✗ Chromium install attempted but still not found on PATH$(RESET)\n"; \
+				fi; \
+			else \
+				printf "$(YELLOW)⚠ No apt-get detected. Please install Chromium manually for your distro.$(RESET)\n"; \
+			fi; \
+		fi; \
+	else \
+		printf "$(GREEN)✓ Not Linux (uname=$(UNAME_S)); skipping Chromium install$(RESET)\n"; \
+	fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Installation (single truth)
@@ -455,7 +484,7 @@ gui: install ## Start backend and launch GUI
 	@printf "$(GREEN)$(BOLD)✓ GUI session complete$(RESET)\n"
 
 .PHONY: launch
-launch: install ## Start backend and launch modern web-based UI (Eel)
+launch: install install-chromium-linux ## Start backend and launch modern web-based UI (Eel)
 	@printf "$(BOLD)$(BLUE)Starting Avatar Renderer Launcher...$(RESET)\n\n"
 	@printf "$(YELLOW)Installing launcher dependencies...$(RESET)\n"
 	@$(UV) pip install --python $(VENV_BIN)/python -e ".[launcher]"
