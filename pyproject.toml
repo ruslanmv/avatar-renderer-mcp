@@ -148,8 +148,14 @@ dev = [
     "mkdocstrings[python]>=0.24.0,<0.25.0",
 ]
 
+launcher = [
+    # Desktop application launcher
+    "eel>=0.16.0,<1.0.0",
+    "python-dotenv>=1.0.0,<2.0.0",
+]
+
 all = [
-    "avatar-renderer-mcp[dev]",
+    "avatar-renderer-mcp[dev,launcher]",
 ]
 
 [project.urls]
