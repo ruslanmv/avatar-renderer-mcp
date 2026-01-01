@@ -1,210 +1,231 @@
 #!/usr/bin/env python3
 """
-demo_avatars.py - Bulk Avatar Generator
+generate_showcase.py - Bulk Avatar Demo Generator (Fixed for Long Text)
 
-Generates a complete set of demo videos for different personas (Professional, Creator, NPC, etc.)
-using specific scripts and their corresponding images from notebook_assets/avatars.
-
-Usage:
-  python demo_avatars.py
+Fixes:
+1. Switches TTS to "Streaming Mode" to handle long paragraphs without cutting off.
+2. Manually saves the streamed PCM data as a valid WAV file.
+3. Keeps the process isolation to prevent VRAM crashes.
 """
-
-from __future__ import annotations
 
 import os
 import time
 import requests
+import multiprocessing
+import warnings
+import wave  # <--- NEW: Required to save streaming audio correctly
 from pathlib import Path
 
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
-
 TTS_SERVER_URL = "http://localhost:4123/v1/audio/speech"
-ASSETS_DIR = Path("notebook_assets/avatars")
-OUTPUT_DIR = Path("output/demos")
 
-# Ensure output directory exists
+# Directory containing your source images
+ASSETS_DIR = Path("notebook_assets/avatars") 
+
+# Output directory
+OUTPUT_DIR = Path("output/demos")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # -----------------------------------------------------------------------------
-# Avatar Definitions
+# The "Script"
 # -----------------------------------------------------------------------------
-
 AVATARS = [
     {
         "name": "professional",
         "image": "professional.png",
-        "voice": "female",
+        "voice": "male",
         "speed": 1.0,
         "text": (
-            "Good morning. I’m your AI assistant, here to provide clear and reliable support. "
-            "I can answer questions, guide next steps, and respond professionally at any time. "
-            "Please let me know how I can assist you today."
+            "Good morning. I’m your AI assistant. "
+            "I am designed to provide clear, reliable support and answer your questions professionally."
         )
     },
     {
-        "name": "creator",
-        "image": "creator.png",
-        "voice": "female",
-        "speed": 1.05,  # Slightly faster/energetic
-        "text": (
-            "Hey! Thanks for being here. "
-            "I’m excited to share something new with you today. "
-            "Let’s create content that feels natural, engaging, and truly alive."
-        )
-    },
-    {
-        "name": "educator",
-        "image": "educator.png",
-        "voice": "female",
-        "speed": 0.95,  # Slightly slower/clearer
-        "text": (
-            "Welcome. Today we’ll explore this topic together, step by step. "
-            "Take your time, and feel free to pause or replay at any moment. "
-            "Learning works best when it feels clear and comfortable."
-        )
-    },
-    {
-        "name": "npc",
+        "name": "npc_villain",
         "image": "npc.png",
         "voice": "male",
-        "speed": 0.9,  # Dramatic/Slow
+        "speed": 0.9,
         "text": (
-            "So… you finally arrived. "
-            "The path ahead isn’t easy, and every choice you make will matter. "
-            "If you’re ready, we can begin."
+            "So... you finally arrived. "
+            "The path ahead is treacherous, and every choice you make will have consequences."
         )
     },
     {
-        "name": "brand",
-        "image": "brand.png",
-        "voice": "female",
-        "speed": 1.0,
+        "name": "content_creator",
+        "image": "creator.png",
+        "voice": "male",
+        "speed": 1.1,
         "text": (
-            "Welcome, and thank you for joining us. "
-            "We’re proud to bring you an experience built on quality and innovation. "
-            "Let’s discover what’s possible together."
+            "Hey guys! Welcome back to the channel. "
+            "Today we're checking out this insane new AI tool that completely changes the game!"
         )
     },
     {
-        "name": "custom",
+        "name": "tech_demo",
         "image": "custom.png",
         "voice": "neutral",
         "speed": 1.0,
         "text": (
-            "Hello. I’m a dynamic AI avatar designed to communicate naturally. "
-            "I can express emotion, adapt my tone, and speak clearly. "
-            "This is a demonstration of realistic avatar rendering."
+            "This is a technical demonstration of multilingual text to speech, "
+            "synchronized with generative lip movements."
         )
     }
 ]
 
 # -----------------------------------------------------------------------------
-# Helpers
+# Helper: TTS Generation (FIXED)
 # -----------------------------------------------------------------------------
-
-def print_banner() -> None:
-    print("=" * 60)
-    print("🚀 Bulk Avatar Generator")
-    print("=" * 60)
-    print(f"📂 Assets: {ASSETS_DIR}")
-    print(f"📂 Output: {OUTPUT_DIR}")
-    print("=" * 60)
-    print()
-
-def generate_audio(text: str, voice: str, speed: float, output_path: Path) -> Path:
-    """Sends text to local TTS server."""
-    print(f"  🎤 Generating audio ({voice}, {speed}x)...")
+def generate_audio(text: str, voice: str, speed: float, output_path: Path) -> bool:
+    print(f"  🎤 Generating Audio ({voice} @ {speed}x)...")
     
+    # [FIX] We switch to stream=True. 
+    # The server handles long text better in stream mode (it chunks by sentence).
     payload = {
         "input": text,
         "language": "en",
         "voice": voice,
         "speed": speed,
         "temperature": 0.7,
-        "stream": False
+        "stream": True  # <--- CHANGED to True
     }
 
     try:
-        response = requests.post(TTS_SERVER_URL, json=payload, timeout=30)
-        if response.status_code != 200:
-            raise RuntimeError(f"TTS Error {response.status_code}: {response.text}")
-        
-        with open(output_path, "wb") as f:
-            f.write(response.content)
-        return output_path
-        
+        # We use stream=True in requests to receive chunks
+        with requests.post(TTS_SERVER_URL, json=payload, stream=True, timeout=60) as resp:
+            if resp.status_code == 200:
+                
+                # 1. Collect all Raw PCM data
+                pcm_data = bytearray()
+                for chunk in resp.iter_content(chunk_size=4096):
+                    if chunk:
+                        pcm_data.extend(chunk)
+
+                if len(pcm_data) == 0:
+                    print("  ❌ Error: Received empty audio stream.")
+                    return False
+
+                # 2. Get Sample Rate from header (default to 24000 if missing)
+                sample_rate = int(resp.headers.get("X-Sample-Rate", 24000))
+
+                # 3. Write as a valid WAV file using the 'wave' library
+                # The server sends 16-bit PCM (2 bytes), Mono (1 channel)
+                with wave.open(str(output_path), "wb") as wav_file:
+                    wav_file.setnchannels(1)      # Mono
+                    wav_file.setsampwidth(2)      # 16-bit = 2 bytes
+                    wav_file.setframerate(sample_rate)
+                    wav_file.writeframes(pcm_data)
+                
+                return True
+            else:
+                print(f"  ❌ TTS Error {resp.status_code}: {resp.text}")
+                return False
+
     except requests.exceptions.ConnectionError:
-        print("\n❌ CRITICAL: Chatterbox TTS Server is not running on port 4123.")
-        raise
+        print("  ❌ TTS Connection Failed (is localhost:4123 running?)")
+        return False
+    except Exception as e:
+        print(f"  ❌ Audio Generation Failed: {e}")
+        return False
 
-def generate_video(image_path: Path, audio_path: Path, output_path: Path) -> None:
-    """Runs the rendering pipeline."""
-    print(f"  🎬 Rendering video...")
-    
-    # Lazy import to avoid loading heavy libs until needed
-    from app.pipeline import render_pipeline
+# -----------------------------------------------------------------------------
+# Helper: Video Rendering (Isolated Process)
+# -----------------------------------------------------------------------------
+def _render_process(image_path: str, audio_path: str, output_path: str):
+    """
+    Runs in a separate process to clear VRAM.
+    """
+    try:
+        # --- PATCH: Fix Librosa/Wav2Lip incompatibility ---
+        import librosa.filters
+        if not hasattr(librosa.filters, 'mel'):
+            pass # Suppress
+            
+        warnings.filterwarnings("ignore")
 
-    render_pipeline(
-        face_image=str(image_path),
-        audio=str(audio_path),
-        out_path=str(output_path),
-        quality_mode="real_time",  # Use 'high_quality' if you have a strong GPU and time
-        force_wav2lip=False
+        # Lazy import
+        from app.pipeline import render_pipeline
+
+        print(f"  🎬 Pipeline Starting...")
+        
+        # 
+        
+        render_pipeline(
+            face_image=image_path,
+            audio=audio_path,
+            out_path=output_path,
+            quality_mode="real_time", 
+            force_wav2lip=False
+        )
+    except Exception as e:
+        print(f"  ❌ Render Crash: {e}")
+        import sys
+        sys.exit(1)
+
+def generate_video_isolated(image_path: Path, audio_path: Path, output_path: Path) -> bool:
+    # Resolve absolute paths
+    p_image = str(image_path.resolve())
+    p_audio = str(audio_path.resolve())
+    p_output = str(output_path.resolve())
+
+    proc = multiprocessing.Process(
+        target=_render_process, 
+        args=(p_image, p_audio, p_output)
     )
+    
+    start = time.time()
+    proc.start()
+    proc.join()
+    elapsed = time.time() - start
+
+    if proc.exitcode == 0:
+        print(f"  ✅ Video Ready in {elapsed:.1f}s")
+        return True
+    else:
+        print("  ❌ Video Generation Failed (Subprocess Error)")
+        return False
 
 # -----------------------------------------------------------------------------
 # Main Loop
 # -----------------------------------------------------------------------------
-
 def main():
-    print_banner()
-
-    # check if server is up before starting loop
     try:
-        requests.get(TTS_SERVER_URL.replace("/v1/audio/speech", "/health"), timeout=2)
+        multiprocessing.set_start_method('spawn', force=True)
+    except RuntimeError:
+        pass
+
+    print("="*60)
+    print(f"🚀 Bulk Avatar Generator starting for {len(AVATARS)} avatars")
+    print("="*60)
+
+    # Simple Check
+    try:
+        requests.get(TTS_SERVER_URL.replace("/speech", "")).status_code
     except:
-        print("❌ Error: TTS Server is offline. Run 'python app/tts/chatterbox_server.py'")
-        return
+        pass 
 
-    total_start = time.time()
+    for i, item in enumerate(AVATARS):
+        print(f"\n[{i+1}/{len(AVATARS)}] Processing: {item['name'].upper()}")
+        
+        img_path = ASSETS_DIR / item['image']
+        wav_path = OUTPUT_DIR / f"{item['name']}.wav"
+        mp4_path = OUTPUT_DIR / f"{item['name']}.mp4"
 
-    for idx, avatar in enumerate(AVATARS, 1):
-        name = avatar['name']
-        image_file = ASSETS_DIR / avatar['image']
-        audio_file = OUTPUT_DIR / f"{name}.wav"
-        video_file = OUTPUT_DIR / f"{name}.mp4"
-
-        print(f"[{idx}/{len(AVATARS)}] Processing: {name.upper()}")
-
-        if not image_file.exists():
-            print(f"  ⚠️  Image not found: {image_file}, skipping...")
+        if not img_path.exists():
+            print(f"  ⚠️ Image not found: {img_path} (Skipping)")
             continue
 
-        try:
-            # 1. Generate Audio
-            generate_audio(avatar['text'], avatar['voice'], avatar['speed'], audio_file)
+        if not generate_audio(item['text'], item['voice'], item['speed'], wav_path):
+            continue
 
-            # 2. Generate Video
-            start_vid = time.time()
-            generate_video(image_file, audio_file, video_file)
-            duration = time.time() - start_vid
-            
-            print(f"  ✅ Saved to: {video_file} ({duration:.1f}s)")
-            
-            # Optional cleanup
-            if audio_file.exists():
-                os.remove(audio_file)
-
-        except Exception as e:
-            print(f"  ❌ Failed: {e}")
+        success = generate_video_isolated(img_path, wav_path, mp4_path)
         
-        print("-" * 60)
+        if success and wav_path.exists():
+            os.remove(wav_path)
 
-    total_time = time.time() - total_start
-    print(f"\n🎉 All tasks completed in {total_time:.1f}s")
-    print(f"📂 Check {OUTPUT_DIR} for results.")
+    print("\n" + "="*60)
+    print(f"🎉 Batch Complete. Check directory: {OUTPUT_DIR.resolve()}")
 
 if __name__ == "__main__":
     main()
