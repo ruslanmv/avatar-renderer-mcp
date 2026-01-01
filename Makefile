@@ -41,7 +41,7 @@ help: ## Show this help message
 	@printf "$(BOLD)$(BLUE)Avatar Renderer MCP - Production Makefile$(RESET)\n\n"
 	@printf "$(BOLD)Usage:$(RESET)\n"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-22s$(RESET) %s\n", $$1, $$2}'
+        awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-22s$(RESET) %s\n", $$1, $$2}'
 	@printf "\n"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -50,25 +50,25 @@ help: ## Show this help message
 .PHONY: verify-uv
 verify-uv: ## Verify uv is installed
 	@command -v $(UV) >/dev/null 2>&1 || { \
-		printf "$(RED)Error: uv not found. Install from https://github.com/astral-sh/uv$(RESET)\n"; \
-		exit 1; \
-	}
+        printf "$(RED)Error: uv not found. Install from https://github.com/astral-sh/uv$(RESET)\n"; \
+        exit 1; \
+    }
 	@printf "$(GREEN)✓ uv found: $$($(UV) --version)$(RESET)\n"
 
 .PHONY: verify-ffmpeg
 verify-ffmpeg: ## Verify ffmpeg is installed
 	@command -v ffmpeg >/dev/null 2>&1 || { \
-		printf "$(YELLOW)⚠ ffmpeg not found. Install it for video processing.$(RESET)\n"; \
-		printf "$(YELLOW)  Ubuntu/Debian: sudo apt-get install ffmpeg$(RESET)\n"; \
-		printf "$(YELLOW)  macOS: brew install ffmpeg$(RESET)\n"; \
-	}
+        printf "$(YELLOW)⚠ ffmpeg not found. Install it for video processing.$(RESET)\n"; \
+        printf "$(YELLOW)  Ubuntu/Debian: sudo apt-get install ffmpeg$(RESET)\n"; \
+        printf "$(YELLOW)  macOS: brew install ffmpeg$(RESET)\n"; \
+    }
 	@command -v ffmpeg >/dev/null 2>&1 && printf "$(GREEN)✓ ffmpeg found: $$(ffmpeg -version | head -n1)$(RESET)\n" || true
 
 .PHONY: venv
 venv: verify-uv ## Create venv if missing
 	@if [ ! -d "$(VENV_DIR)" ]; then \
-		$(UV) venv $(VENV_DIR) --python $(PYTHON); \
-	fi
+        $(UV) venv $(VENV_DIR) --python $(PYTHON); \
+    fi
 	@printf "$(GREEN)✓ venv ready: $(VENV_DIR)$(RESET)\n"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -77,26 +77,26 @@ venv: verify-uv ## Create venv if missing
 .PHONY: install-chromium-linux
 install-chromium-linux: ## Install Chromium if on Linux and missing (Debian/Ubuntu via apt)
 	@if [ "$(UNAME_S)" = "Linux" ]; then \
-		if command -v chromium >/dev/null 2>&1 || command -v chromium-browser >/dev/null 2>&1; then \
-			printf "$(GREEN)✓ Chromium already installed$(RESET)\n"; \
-		else \
-			printf "$(YELLOW)⚠ Chromium not found. Launcher (Eel) requires Chromium/Chrome.$(RESET)\n"; \
-			if command -v apt-get >/dev/null 2>&1; then \
-				printf "$(BLUE)→ Installing Chromium via apt...$(RESET)\n"; \
-				sudo apt update; \
-				( sudo apt install -y chromium-browser ) || ( sudo apt install -y chromium ); \
-				if command -v chromium >/dev/null 2>&1 || command -v chromium-browser >/dev/null 2>&1; then \
-					printf "$(GREEN)✓ Chromium installed successfully$(RESET)\n"; \
-				else \
-					printf "$(RED)✗ Chromium install attempted but still not found on PATH$(RESET)\n"; \
-				fi; \
-			else \
-				printf "$(YELLOW)⚠ No apt-get detected. Please install Chromium manually for your distro.$(RESET)\n"; \
-			fi; \
-		fi; \
-	else \
-		printf "$(GREEN)✓ Not Linux (uname=$(UNAME_S)); skipping Chromium install$(RESET)\n"; \
-	fi
+        if command -v chromium >/dev/null 2>&1 || command -v chromium-browser >/dev/null 2>&1; then \
+            printf "$(GREEN)✓ Chromium already installed$(RESET)\n"; \
+        else \
+            printf "$(YELLOW)⚠ Chromium not found. Launcher (Eel) requires Chromium/Chrome.$(RESET)\n"; \
+            if command -v apt-get >/dev/null 2>&1; then \
+                printf "$(BLUE)→ Installing Chromium via apt...$(RESET)\n"; \
+                sudo apt update; \
+                ( sudo apt install -y chromium-browser ) || ( sudo apt install -y chromium ); \
+                if command -v chromium >/dev/null 2>&1 || command -v chromium-browser >/dev/null 2>&1; then \
+                    printf "$(GREEN)✓ Chromium installed successfully$(RESET)\n"; \
+                else \
+                    printf "$(RED)✗ Chromium install attempted but still not found on PATH$(RESET)\n"; \
+                fi; \
+            else \
+                printf "$(YELLOW)⚠ No apt-get detected. Please install Chromium manually for your distro.$(RESET)\n"; \
+            fi; \
+        fi; \
+    else \
+        printf "$(GREEN)✓ Not Linux (uname=$(UNAME_S)); skipping Chromium install$(RESET)\n"; \
+    fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Installation (single truth)
@@ -109,7 +109,7 @@ install: venv install-internal install-git-deps install-external-py download-mod
 	@printf "$(BOLD)Run demo:$(RESET)     make demo\n"
 
 .PHONY: install-internal
-install-internal: venv ## Install internal package deps (pyproject)
+install-internal: venv ## Install internal package deps (pyproject.toml)
 	@printf "$(BLUE)Installing internal package deps from pyproject.toml...$(RESET)\n"
 	@$(UV) pip install --python $(VENV_BIN)/python -e .
 	@printf "$(GREEN)✓ Internal deps installed$(RESET)\n"
@@ -134,66 +134,66 @@ install-git-deps: venv ## Clone external Git dependencies and install guided_dif
 
 	@# SadTalker
 	@if [ ! -d "$(EXT_DEPS_DIR)/SadTalker" ]; then \
-		printf "$(BLUE)→ Cloning SadTalker...$(RESET)\n"; \
-		git clone --depth=1 $(SADTALKER_REPO) $(EXT_DEPS_DIR)/SadTalker || { \
-			printf "$(YELLOW)⚠ SadTalker clone failed (optional)$(RESET)\n"; \
-			true; \
-		}; \
-	else \
-		printf "$(GREEN)↪ SadTalker already present$(RESET)\n"; \
-	fi
+        printf "$(BLUE)→ Cloning SadTalker...$(RESET)\n"; \
+        git clone --depth=1 $(SADTALKER_REPO) $(EXT_DEPS_DIR)/SadTalker || { \
+            printf "$(YELLOW)⚠ SadTalker clone failed (optional)$(RESET)\n"; \
+            true; \
+        }; \
+    else \
+        printf "$(GREEN)↪ SadTalker already present$(RESET)\n"; \
+    fi
 
 	@# First Order Motion Model (CRITICAL)
 	@if [ ! -d "$(EXT_DEPS_DIR)/first-order-model" ]; then \
-		printf "$(BLUE)→ Cloning first-order-model...$(RESET)\n"; \
-		git clone --depth=1 $(FOMM_REPO) $(EXT_DEPS_DIR)/first-order-model || { \
-			printf "$(RED)✗ first-order-model clone failed (CRITICAL)$(RESET)\n"; \
-			exit 1; \
-		}; \
-	else \
-		printf "$(GREEN)↪ first-order-model already present$(RESET)\n"; \
-	fi
+        printf "$(BLUE)→ Cloning first-order-model...$(RESET)\n"; \
+        git clone --depth=1 $(FOMM_REPO) $(EXT_DEPS_DIR)/first-order-model || { \
+            printf "$(RED)✗ first-order-model clone failed (CRITICAL)$(RESET)\n"; \
+            exit 1; \
+        }; \
+    else \
+        printf "$(GREEN)↪ first-order-model already present$(RESET)\n"; \
+    fi
 
 	@# Wav2Lip (CRITICAL)
 	@if [ ! -d "$(EXT_DEPS_DIR)/Wav2Lip" ]; then \
-		printf "$(BLUE)→ Cloning Wav2Lip...$(RESET)\n"; \
-		git clone --depth=1 $(WAV2LIP_REPO) $(EXT_DEPS_DIR)/Wav2Lip || { \
-			printf "$(RED)✗ Wav2Lip clone failed (CRITICAL)$(RESET)\n"; \
-			exit 1; \
-		}; \
-	else \
-		printf "$(GREEN)↪ Wav2Lip already present$(RESET)\n"; \
-	fi
+        printf "$(BLUE)→ Cloning Wav2Lip...$(RESET)\n"; \
+        git clone --depth=1 $(WAV2LIP_REPO) $(EXT_DEPS_DIR)/Wav2Lip || { \
+            printf "$(RED)✗ Wav2Lip clone failed (CRITICAL)$(RESET)\n"; \
+            exit 1; \
+        }; \
+    else \
+        printf "$(GREEN)↪ Wav2Lip already present$(RESET)\n"; \
+    fi
 
 	@# Diff2Lip (Optional but recommended for HQ)
 	@if [ ! -d "$(EXT_DEPS_DIR)/Diff2Lip" ]; then \
-		printf "$(BLUE)→ Cloning Diff2Lip...$(RESET)\n"; \
-		git clone --depth=1 $(DIFF2LIP_REPO) $(EXT_DEPS_DIR)/Diff2Lip || { \
-			printf "$(YELLOW)⚠ Diff2Lip clone failed. Will fallback to Wav2Lip at runtime.$(RESET)\n"; \
-			true; \
-		}; \
-	else \
-		printf "$(GREEN)↪ Diff2Lip already present$(RESET)\n"; \
-	fi
+        printf "$(BLUE)→ Cloning Diff2Lip...$(RESET)\n"; \
+        git clone --depth=1 $(DIFF2LIP_REPO) $(EXT_DEPS_DIR)/Diff2Lip || { \
+            printf "$(YELLOW)⚠ Diff2Lip clone failed. Will fallback to Wav2Lip at runtime.$(RESET)\n"; \
+            true; \
+        }; \
+    else \
+        printf "$(GREEN)↪ Diff2Lip already present$(RESET)\n"; \
+    fi
 
 	@# guided-diffusion (CRITICAL for Diff2Lip) - Clone and install as editable
 	@printf "\n$(BLUE)$(BOLD)Installing guided-diffusion (required for Diff2Lip)...$(RESET)\n"
 	@if [ ! -d "$(EXT_DEPS_DIR)/guided-diffusion" ]; then \
-		printf "$(BLUE)→ Cloning guided-diffusion...$(RESET)\n"; \
-		git clone $(GUIDED_DIFFUSION_REPO) $(EXT_DEPS_DIR)/guided-diffusion || { \
-			printf "$(RED)✗ guided-diffusion clone failed$(RESET)\n"; \
-			exit 1; \
-		}; \
-	else \
-		printf "$(GREEN)↪ guided-diffusion already cloned$(RESET)\n"; \
-	fi
+        printf "$(BLUE)→ Cloning guided-diffusion...$(RESET)\n"; \
+        git clone $(GUIDED_DIFFUSION_REPO) $(EXT_DEPS_DIR)/guided-diffusion || { \
+            printf "$(RED)✗ guided-diffusion clone failed$(RESET)\n"; \
+            exit 1; \
+        }; \
+    else \
+        printf "$(GREEN)↪ guided-diffusion already cloned$(RESET)\n"; \
+    fi
 	
 	@# Install guided-diffusion in editable mode
 	@printf "$(BLUE)→ Installing guided-diffusion with editable mode...$(RESET)\n"
 	@$(UV) pip install --python $(VENV_BIN)/python -e $(EXT_DEPS_DIR)/guided-diffusion || { \
-		printf "$(RED)✗ guided-diffusion install failed$(RESET)\n"; \
-		exit 1; \
-	}
+        printf "$(RED)✗ guided-diffusion install failed$(RESET)\n"; \
+        exit 1; \
+    }
 	
 	@# Install guided-diffusion core dependencies (skip optional mpi4py)
 	@printf "$(BLUE)→ Installing guided-diffusion dependencies...$(RESET)\n"
@@ -202,21 +202,21 @@ install-git-deps: venv ## Clone external Git dependencies and install guided_dif
 	@# Verify guided-diffusion works (skip mpi4py check)
 	@printf "$(BLUE)→ Verifying guided-diffusion installation...$(RESET)\n"
 	@$(VENV_BIN)/python -c "import guided_diffusion; print('  ✓ guided_diffusion import successful')" || { \
-		printf "$(RED)  ✗ guided_diffusion import failed$(RESET)\n"; \
-		exit 1; \
-	}
+        printf "$(RED)  ✗ guided_diffusion import failed$(RESET)\n"; \
+        exit 1; \
+    }
 	@$(VENV_BIN)/python -c "from guided_diffusion import dist_util; print('  ✓ dist_util import successful (mpi4py is optional)')" 2>/dev/null || { \
-		printf "$(YELLOW)  ⚠ dist_util requires mpi4py (optional, not needed for basic usage)$(RESET)\n"; \
-		true; \
-	}
+        printf "$(YELLOW)  ⚠ dist_util requires mpi4py (optional, not needed for basic usage)$(RESET)\n"; \
+        true; \
+    }
 	@printf "$(GREEN)✓ guided_diffusion installed successfully$(RESET)\n"
 
 	@# FOMM wrapper patch (if exists)
 	@if [ -f "patches/fomm/fomm_wrapper.py" ]; then \
-		printf "$(BLUE)→ Installing FOMM wrapper patch...$(RESET)\n"; \
-		cp patches/fomm/fomm_wrapper.py $(EXT_DEPS_DIR)/first-order-model/fomm_wrapper.py; \
-		printf "$(GREEN)✓ FOMM wrapper installed$(RESET)\n"; \
-	fi
+        printf "$(BLUE)→ Installing FOMM wrapper patch...$(RESET)\n"; \
+        cp patches/fomm/fomm_wrapper.py $(EXT_DEPS_DIR)/first-order-model/fomm_wrapper.py; \
+        printf "$(GREEN)✓ FOMM wrapper installed$(RESET)\n"; \
+    fi
 
 	@printf "$(GREEN)$(BOLD)✓ Git dependencies ready$(RESET)\n"
 
@@ -231,61 +231,61 @@ install-external-py: venv ## Install external python deps required by cloned rep
 	@# Core dependencies (ensure they're installed with correct versions)
 	@printf "$(BLUE)→ Installing core dependencies...$(RESET)\n"
 	@$(UV) pip install --python $(VENV_BIN)/python \
-		"numpy<2.0.0" \
-		"opencv-python>=4.8.0,<5.0.0" \
-		"Pillow>=10.0.0,<11.0.0" \
-		"scipy>=1.11.0,<2.0.0" \
-		"scikit-image>=0.21.0,<0.22.0" \
-		|| { printf "$(RED)✗ Core deps failed$(RESET)\n"; exit 1; }
+        "numpy<2.0.0" \
+        "opencv-python>=4.8.0,<5.0.0" \
+        "Pillow>=10.0.0,<11.0.0" \
+        "scipy>=1.11.0,<2.0.0" \
+        "scikit-image>=0.21.0,<0.22.0" \
+        || { printf "$(RED)✗ Core deps failed$(RESET)\n"; exit 1; }
 
 	@# Audio processing
 	@printf "$(BLUE)→ Installing audio processing stack...$(RESET)\n"
 	@$(UV) pip install --python $(VENV_BIN)/python \
-		"librosa==0.9.2" \
-		"soundfile>=0.12.0,<0.13.0" \
-		"numba>=0.58.0" \
-		|| { printf "$(RED)✗ Audio deps failed$(RESET)\n"; exit 1; }
+        "librosa==0.9.2" \
+        "soundfile>=0.12.0,<0.13.0" \
+        "numba>=0.58.0" \
+        || { printf "$(RED)✗ Audio deps failed$(RESET)\n"; exit 1; }
 
 	@# Video processing
 	@printf "$(BLUE)→ Installing video processing stack...$(RESET)\n"
 	@$(UV) pip install --python $(VENV_BIN)/python \
-		ffmpeg-python \
-		imageio \
-		imageio-ffmpeg \
-		|| { printf "$(RED)✗ Video deps failed$(RESET)\n"; exit 1; }
+        ffmpeg-python \
+        imageio \
+        imageio-ffmpeg \
+        || { printf "$(RED)✗ Video deps failed$(RESET)\n"; exit 1; }
 
 	@# Configuration and utilities
 	@printf "$(BLUE)→ Installing utilities...$(RESET)\n"
 	@$(UV) pip install --python $(VENV_BIN)/python \
-		pyyaml \
-		yacs \
-		tqdm \
-		|| { printf "$(RED)✗ Utility deps failed$(RESET)\n"; exit 1; }
+        pyyaml \
+        yacs \
+        tqdm \
+        || { printf "$(RED)✗ Utility deps failed$(RESET)\n"; exit 1; }
 
 	@# SadTalker specific dependencies (optional)
 	@printf "$(BLUE)→ Installing SadTalker stack (optional)...$(RESET)\n"
 	@$(UV) pip install --python $(VENV_BIN)/python \
-		kornia \
-		face-alignment \
-		mediapipe \
-		|| { printf "$(YELLOW)⚠ SadTalker deps partially failed (optional)$(RESET)\n"; true; }
+        kornia \
+        face-alignment \
+        mediapipe \
+        || { printf "$(YELLOW)⚠ SadTalker deps partially failed (optional)$(RESET)\n"; true; }
 
 	@# Face enhancement stack (optional)
 	@printf "$(BLUE)→ Installing face enhancement stack (optional)...$(RESET)\n"
 	@$(UV) pip install --python $(VENV_BIN)/python \
-		gfpgan \
-		facexlib \
-		basicsr \
-		realesrgan \
-		|| { printf "$(YELLOW)⚠ Enhancement stack partially failed (optional)$(RESET)\n"; true; }
+        gfpgan \
+        facexlib \
+        basicsr \
+        realesrgan \
+        || { printf "$(YELLOW)⚠ Enhancement stack partially failed (optional)$(RESET)\n"; true; }
 
 	@# Additional ML dependencies
 	@printf "$(BLUE)→ Installing additional ML dependencies...$(RESET)\n"
 	@$(UV) pip install --python $(VENV_BIN)/python \
-		"torchvision>=0.15.0" \
-		"transformers>=4.35.0" \
-		"diffusers>=0.25.0" \
-		|| { printf "$(YELLOW)⚠ ML deps partially failed$(RESET)\n"; true; }
+        "torchvision>=0.15.0" \
+        "transformers>=4.35.0" \
+        "diffusers>=0.25.0" \
+        || { printf "$(YELLOW)⚠ ML deps partially failed$(RESET)\n"; true; }
 
 	@printf "$(GREEN)$(BOLD)✓ External Python deps installed$(RESET)\n"
 
@@ -302,15 +302,15 @@ download-models: ## Download model checkpoints
 	@mkdir -p $(MODELS_DIR)/sadtalker
 	@mkdir -p $(MODELS_DIR)/gfpgan
 	@if [ -f "scripts/download_models.sh" ]; then \
-		bash scripts/download_models.sh "$(MODELS_DIR)"; \
-	else \
-		printf "$(YELLOW)⚠ scripts/download_models.sh not found.$(RESET)\n"; \
-		printf "$(YELLOW)  Models must be downloaded manually to:$(RESET)\n"; \
-		printf "$(YELLOW)    - $(MODELS_DIR)/fomm/vox-cpk.pth$(RESET)\n"; \
-		printf "$(YELLOW)    - $(MODELS_DIR)/wav2lip/wav2lip_gan.pth$(RESET)\n"; \
-		printf "$(YELLOW)    - $(MODELS_DIR)/diff2lip/Diff2Lip.pth (optional)$(RESET)\n"; \
-		printf "$(YELLOW)    - $(MODELS_DIR)/gfpgan/GFPGANv1.3.pth (optional)$(RESET)\n"; \
-	fi
+        bash scripts/download_models.sh "$(MODELS_DIR)"; \
+    else \
+        printf "$(YELLOW)⚠ scripts/download_models.sh not found.$(RESET)\n"; \
+        printf "$(YELLOW)  Models must be downloaded manually to:$(RESET)\n"; \
+        printf "$(YELLOW)    - $(MODELS_DIR)/fomm/vox-cpk.pth$(RESET)\n"; \
+        printf "$(YELLOW)    - $(MODELS_DIR)/wav2lip/wav2lip_gan.pth$(RESET)\n"; \
+        printf "$(YELLOW)    - $(MODELS_DIR)/diff2lip/Diff2Lip.pth (optional)$(RESET)\n"; \
+        printf "$(YELLOW)    - $(MODELS_DIR)/gfpgan/GFPGANv1.3.pth (optional)$(RESET)\n"; \
+    fi
 	@printf "$(GREEN)✓ Models step complete$(RESET)\n"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -343,13 +343,13 @@ verify: venv ## Verify all dependencies are installed
 	
 	@printf "\n$(BOLD)Critical for Diff2Lip:$(RESET)\n"
 	@$(VENV_BIN)/python -c "import guided_diffusion; print('  ✅ guided_diffusion installed at:', guided_diffusion.__file__)" || { \
-		printf "  $(RED)❌ guided_diffusion missing - Diff2Lip will FAIL$(RESET)\n"; \
-		printf "  $(YELLOW)→ Fix: make fix-deps$(RESET)\n"; \
-	}
+        printf "  $(RED)❌ guided_diffusion missing - Diff2Lip will FAIL$(RESET)\n"; \
+        printf "  $(YELLOW)→ Fix: make fix-deps$(RESET)\n"; \
+    }
 	@$(VENV_BIN)/python -c "import guided_diffusion.gaussian_diffusion; print('  ✅ guided_diffusion modules accessible')" 2>/dev/null || { \
-		printf "  $(YELLOW)⚠  Some guided_diffusion modules inaccessible (may still work)$(RESET)\n"; \
-		true; \
-	}
+        printf "  $(YELLOW)⚠  Some guided_diffusion modules inaccessible (may still work)$(RESET)\n"; \
+        true; \
+    }
 	
 	@printf "\n$(BOLD)Optional Enhancement:$(RESET)\n"
 	@$(VENV_BIN)/python -c "\
@@ -380,11 +380,11 @@ print('  ✅ gfpgan installed (with monkeypatch)'); \
 verify-full: venv ## Run comprehensive Python verification script
 	@printf "$(BLUE)Running comprehensive verification script...$(RESET)\n"
 	@if [ -f "scripts/verify_setup.py" ]; then \
-		$(VENV_BIN)/python scripts/verify_setup.py; \
-	else \
-		printf "$(YELLOW)⚠ scripts/verify_setup.py not found$(RESET)\n"; \
-		$(MAKE) verify; \
-	fi
+        $(VENV_BIN)/python scripts/verify_setup.py; \
+    else \
+        printf "$(YELLOW)⚠ scripts/verify_setup.py not found$(RESET)\n"; \
+        $(MAKE) verify; \
+    fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Fix missing dependencies
@@ -415,120 +415,156 @@ fix-deps: venv ## Fix missing dependencies (guided_diffusion, etc.)
 # ─────────────────────────────────────────────────────────────────────────────
 # Run
 # ─────────────────────────────────────────────────────────────────────────────
+.PHONY: tts
+tts: install ## Start Chatterbox TTS Server (Port 4123)
+	@printf "$(BLUE)Starting TTS Server...$(RESET)\n"
+	@PYTHONPATH=$(CURDIR)/$(EXT_DEPS_DIR):$(PYTHONPATH) \
+        MODEL_ROOT=$(MODELS_DIR) \
+        EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
+        $(VENV_BIN)/uvicorn app.tts.chatterbox_server:app --host 0.0.0.0 --port 4123 --reload
+
 .PHONY: run
-run: install ## Start FastAPI server on :8080
+run: install ## Start FastAPI Avatar Server (Port 8000)
 	@printf "$(BLUE)Starting FastAPI server...$(RESET)\n"
 	@PYTHONPATH=$(CURDIR)/$(EXT_DEPS_DIR):$(PYTHONPATH) \
-		MODEL_ROOT=$(MODELS_DIR) \
-		EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
-		$(VENV_BIN)/uvicorn app.api:app --host 0.0.0.0 --port 8080 --reload
+        MODEL_ROOT=$(MODELS_DIR) \
+        EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
+        $(VENV_BIN)/uvicorn app.api:app --host 0.0.0.0 --port 8000 --reload
 
 .PHONY: run-stdio
 run-stdio: install ## Start MCP STDIO server
 	@printf "$(BLUE)Starting MCP STDIO server...$(RESET)\n"
 	@PYTHONPATH=$(CURDIR)/$(EXT_DEPS_DIR):$(PYTHONPATH) \
-		MODEL_ROOT=$(MODELS_DIR) \
-		EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
-		$(VENV_BIN)/python -m app.mcp_server
+        MODEL_ROOT=$(MODELS_DIR) \
+        EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
+        $(VENV_BIN)/python -m app.mcp_server
 
 .PHONY: demo
 demo: install ## Run demo script
 	@printf "$(BLUE)Running demo...$(RESET)\n"
 	@PYTHONPATH=$(CURDIR)/$(EXT_DEPS_DIR):$(PYTHONPATH) \
-		MODEL_ROOT=$(MODELS_DIR) \
-		EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
-		$(VENV_BIN)/python demo.py
+        MODEL_ROOT=$(MODELS_DIR) \
+        EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
+        $(VENV_BIN)/python demo.py
 
 .PHONY: gui
-gui: install ## Start backend and launch GUI
-	@printf "$(BOLD)$(BLUE)Starting Avatar Renderer GUI...$(RESET)\n\n"
-	@printf "$(BLUE)Step 1: Starting backend server...$(RESET)\n"
-	@# Start backend in background
+gui: install ## Start Backend (8000) + TTS (4123) + Desktop GUI
+	@printf "$(BOLD)$(BLUE)Starting Avatar Renderer GUI (Full Stack)...$(RESET)\n\n"
+	
+	@printf "$(BLUE)Step 1: Starting TTS Server (Port 4123)...$(RESET)\n"
 	@PYTHONPATH=$(CURDIR)/$(EXT_DEPS_DIR):$(PYTHONPATH) \
-		MODEL_ROOT=$(MODELS_DIR) \
-		EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
-		$(VENV_BIN)/uvicorn app.api:app --host 0.0.0.0 --port 8000 > /tmp/avatar-backend.log 2>&1 & \
-		echo $$! > /tmp/avatar-backend.pid
-	@printf "$(GREEN)✓ Backend started (PID: $$(cat /tmp/avatar-backend.pid))$(RESET)\n"
-	@printf "$(BLUE)Step 2: Waiting for backend to be ready...$(RESET)\n"
-	@# Wait for backend to be healthy
+        MODEL_ROOT=$(MODELS_DIR) \
+        EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
+        $(VENV_BIN)/uvicorn app.tts.chatterbox_server:app --host 0.0.0.0 --port 4123 > /tmp/avatar-tts.log 2>&1 & \
+        echo $$! > /tmp/avatar-tts.pid
+	
+	@printf "$(BLUE)Step 2: Starting Backend Server (Port 8000)...$(RESET)\n"
+	@PYTHONPATH=$(CURDIR)/$(EXT_DEPS_DIR):$(PYTHONPATH) \
+        MODEL_ROOT=$(MODELS_DIR) \
+        EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
+        $(VENV_BIN)/uvicorn app.api:app --host 0.0.0.0 --port 8000 > /tmp/avatar-backend.log 2>&1 & \
+        echo $$! > /tmp/avatar-backend.pid
+	
+	@printf "$(BLUE)Step 3: Waiting for services to be ready...$(RESET)\n"
 	@for i in {1..30}; do \
-		if curl -s http://localhost:8000/health/live > /dev/null 2>&1; then \
-			printf "$(GREEN)✓ Backend is ready!$(RESET)\n"; \
-			break; \
-		fi; \
-		printf "."; \
-		sleep 1; \
-		if [ $$i -eq 30 ]; then \
-			printf "\n$(RED)✗ Backend failed to start after 30 seconds$(RESET)\n"; \
-			printf "$(YELLOW)Check logs: tail -f /tmp/avatar-backend.log$(RESET)\n"; \
-			kill $$(cat /tmp/avatar-backend.pid) 2>/dev/null || true; \
-			rm -f /tmp/avatar-backend.pid; \
-			exit 1; \
-		fi; \
-	done
-	@printf "$(BLUE)Step 3: Launching GUI...$(RESET)\n\n"
-	@# Launch GUI (this will block until GUI is closed)
+        if curl -s http://localhost:8000/health/live > /dev/null 2>&1 && curl -s http://localhost:4123/health > /dev/null 2>&1; then \
+            printf "$(GREEN)✓ All services are ready!$(RESET)\n"; \
+            break; \
+        fi; \
+        printf "."; \
+        sleep 1; \
+        if [ $$i -eq 30 ]; then \
+            printf "\n$(RED)✗ Services failed to start within 30 seconds$(RESET)\n"; \
+            printf "$(YELLOW)Check backend logs: tail -f /tmp/avatar-backend.log$(RESET)\n"; \
+            printf "$(YELLOW)Check TTS logs: tail -f /tmp/avatar-tts.log$(RESET)\n"; \
+            kill $$(cat /tmp/avatar-backend.pid) 2>/dev/null || true; \
+            kill $$(cat /tmp/avatar-tts.pid) 2>/dev/null || true; \
+            rm -f /tmp/avatar-backend.pid /tmp/avatar-tts.pid; \
+            exit 1; \
+        fi; \
+    done
+	
+	@printf "$(BLUE)Step 4: Launching Desktop GUI...$(RESET)\n\n"
 	@PYTHONPATH=$(CURDIR)/$(EXT_DEPS_DIR):$(PYTHONPATH) \
-		MODEL_ROOT=$(MODELS_DIR) \
-		EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
-		API_URL=http://localhost:8000 \
-		$(VENV_BIN)/python -m gui || true
-	@# Cleanup: Stop backend when GUI exits
-	@printf "\n$(BLUE)Stopping backend server...$(RESET)\n"
+        MODEL_ROOT=$(MODELS_DIR) \
+        EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
+        API_URL=http://localhost:8000 \
+        CHATTERBOX_URL=http://localhost:4123 \
+        $(VENV_BIN)/python -m gui || true
+	
+	@# Cleanup
+	@printf "\n$(BLUE)Stopping background services...$(RESET)\n"
 	@if [ -f /tmp/avatar-backend.pid ]; then \
-		kill $$(cat /tmp/avatar-backend.pid) 2>/dev/null || true; \
-		rm -f /tmp/avatar-backend.pid; \
-		printf "$(GREEN)✓ Backend stopped$(RESET)\n"; \
-	fi
-	@printf "$(GREEN)$(BOLD)✓ GUI session complete$(RESET)\n"
+        kill $$(cat /tmp/avatar-backend.pid) 2>/dev/null || true; \
+        rm -f /tmp/avatar-backend.pid; \
+    fi
+	@if [ -f /tmp/avatar-tts.pid ]; then \
+        kill $$(cat /tmp/avatar-tts.pid) 2>/dev/null || true; \
+        rm -f /tmp/avatar-tts.pid; \
+    fi
+	@printf "$(GREEN)$(BOLD)✓ Session complete$(RESET)\n"
 
 .PHONY: launch
-launch: install install-chromium-linux ## Start backend and launch modern web-based UI (Eel)
-	@printf "$(BOLD)$(BLUE)Starting Avatar Renderer Launcher...$(RESET)\n\n"
+launch: install install-chromium-linux ## Start Backend (8000) + TTS (4123) + Web Launcher
+	@printf "$(BOLD)$(BLUE)Starting Avatar Renderer Launcher (Full Stack)...$(RESET)\n\n"
 	@printf "$(YELLOW)Installing launcher dependencies...$(RESET)\n"
 	@$(UV) pip install --python $(VENV_BIN)/python -e ".[launcher]"
 	@printf "$(GREEN)✓ Launcher dependencies installed$(RESET)\n\n"
-	@printf "$(BLUE)Step 1: Starting backend server...$(RESET)\n"
-	@# Start backend in background
+	
+	@printf "$(BLUE)Step 1: Starting TTS Server (Port 4123)...$(RESET)\n"
 	@PYTHONPATH=$(CURDIR)/$(EXT_DEPS_DIR):$(PYTHONPATH) \
-		MODEL_ROOT=$(MODELS_DIR) \
-		EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
-		$(VENV_BIN)/uvicorn app.api:app --host 0.0.0.0 --port 8000 > /tmp/avatar-backend.log 2>&1 & \
-		echo $$! > /tmp/avatar-backend.pid
-	@printf "$(GREEN)✓ Backend started (PID: $$(cat /tmp/avatar-backend.pid))$(RESET)\n"
-	@printf "$(BLUE)Step 2: Waiting for backend to be ready...$(RESET)\n"
-	@# Wait for backend to be healthy
+        MODEL_ROOT=$(MODELS_DIR) \
+        EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
+        $(VENV_BIN)/uvicorn app.tts.chatterbox_server:app --host 0.0.0.0 --port 4123 > /tmp/avatar-tts.log 2>&1 & \
+        echo $$! > /tmp/avatar-tts.pid
+
+	@printf "$(BLUE)Step 2: Starting Backend Server (Port 8000)...$(RESET)\n"
+	@PYTHONPATH=$(CURDIR)/$(EXT_DEPS_DIR):$(PYTHONPATH) \
+        MODEL_ROOT=$(MODELS_DIR) \
+        EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
+        $(VENV_BIN)/uvicorn app.api:app --host 0.0.0.0 --port 8000 > /tmp/avatar-backend.log 2>&1 & \
+        echo $$! > /tmp/avatar-backend.pid
+
+	@printf "$(BLUE)Step 3: Waiting for services to be ready...$(RESET)\n"
 	@for i in {1..30}; do \
-		if curl -s http://localhost:8000/health/live > /dev/null 2>&1; then \
-			printf "$(GREEN)✓ Backend is ready!$(RESET)\n"; \
-			break; \
-		fi; \
-		printf "."; \
-		sleep 1; \
-		if [ $$i -eq 30 ]; then \
-			printf "\n$(RED)✗ Backend failed to start after 30 seconds$(RESET)\n"; \
-			printf "$(YELLOW)Check logs: tail -f /tmp/avatar-backend.log$(RESET)\n"; \
-			kill $$(cat /tmp/avatar-backend.pid) 2>/dev/null || true; \
-			rm -f /tmp/avatar-backend.pid; \
-			exit 1; \
-		fi; \
-	done
-	@printf "$(BLUE)Step 3: Launching modern web UI...$(RESET)\n\n"
-	@# Launch modern web-based UI (this will block until UI is closed)
+        if curl -s http://localhost:8000/health/live > /dev/null 2>&1 && curl -s http://localhost:4123/health > /dev/null 2>&1; then \
+            printf "$(GREEN)✓ All services are ready!$(RESET)\n"; \
+            break; \
+        fi; \
+        printf "."; \
+        sleep 1; \
+        if [ $$i -eq 30 ]; then \
+            printf "\n$(RED)✗ Services failed to start within 30 seconds$(RESET)\n"; \
+            printf "$(YELLOW)Check backend logs: tail -f /tmp/avatar-backend.log$(RESET)\n"; \
+            printf "$(YELLOW)Check TTS logs: tail -f /tmp/avatar-tts.log$(RESET)\n"; \
+            kill $$(cat /tmp/avatar-backend.pid) 2>/dev/null || true; \
+            kill $$(cat /tmp/avatar-tts.pid) 2>/dev/null || true; \
+            rm -f /tmp/avatar-backend.pid /tmp/avatar-tts.pid; \
+            exit 1; \
+        fi; \
+    done
+
+	@printf "$(BLUE)Step 4: Launching Modern Web UI...$(RESET)\n\n"
 	@PYTHONPATH=$(CURDIR)/$(EXT_DEPS_DIR):$(PYTHONPATH) \
-		MODEL_ROOT=$(MODELS_DIR) \
-		EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
-		API_URL=http://localhost:8000 \
-		$(VENV_BIN)/python -m launcher || true
-	@# Cleanup: Stop backend when launcher exits
-	@printf "\n$(BLUE)Stopping backend server...$(RESET)\n"
+        MODEL_ROOT=$(MODELS_DIR) \
+        EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
+        API_URL=http://localhost:8000 \
+        $(VENV_BIN)/python -m launcher || true
+	
+	@# Cleanup
+	@printf "\n$(BLUE)Stopping background services...$(RESET)\n"
 	@if [ -f /tmp/avatar-backend.pid ]; then \
-		kill $$(cat /tmp/avatar-backend.pid) 2>/dev/null || true; \
-		rm -f /tmp/avatar-backend.pid; \
-		printf "$(GREEN)✓ Backend stopped$(RESET)\n"; \
-	fi
-	@printf "$(GREEN)$(BOLD)✓ Launcher session complete$(RESET)\n"
+        kill $$(cat /tmp/avatar-backend.pid) 2>/dev/null || true; \
+        rm -f /tmp/avatar-backend.pid; \
+    fi
+	@if [ -f /tmp/avatar-tts.pid ]; then \
+        kill $$(cat /tmp/avatar-tts.pid) 2>/dev/null || true; \
+        rm -f /tmp/avatar-tts.pid; \
+    fi
+	@printf "$(GREEN)$(BOLD)✓ Session complete$(RESET)\n"
+
+.PHONY: start
+start: launch ## Alias for 'make launch' (Starts everything)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Tests
@@ -537,18 +573,18 @@ launch: install install-chromium-linux ## Start backend and launch modern web-ba
 test-light: install ## Run lightweight health check tests (fast)
 	@printf "$(BLUE)Running lightweight health checks...$(RESET)\n"
 	@PYTHONPATH=$(CURDIR)/$(EXT_DEPS_DIR):$(PYTHONPATH) \
-		MODEL_ROOT=$(MODELS_DIR) \
-		EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
-		$(VENV_BIN)/python tests/test_health.py
+        MODEL_ROOT=$(MODELS_DIR) \
+        EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
+        $(VENV_BIN)/python tests/test_health.py
 	@printf "$(GREEN)✓ Health checks complete$(RESET)\n"
 
 .PHONY: test
 test: install ## Run full test suite
 	@printf "$(BLUE)Running test suite...$(RESET)\n"
 	@PYTHONPATH=$(CURDIR)/$(EXT_DEPS_DIR):$(PYTHONPATH) \
-		MODEL_ROOT=$(MODELS_DIR) \
-		EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
-		$(VENV_BIN)/pytest tests/ -v
+        MODEL_ROOT=$(MODELS_DIR) \
+        EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
+        $(VENV_BIN)/pytest tests/ -v
 	@printf "$(GREEN)✓ Tests complete$(RESET)\n"
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -435,7 +435,8 @@ class AvatarGeneratorGUI(tk.Tk):
             self.after(0, self._audio_success)
 
         except Exception as e:
-            self.after(0, lambda: self._error_handler(f"Audio failed: {e}"))
+            err = str(e)
+            self.after(0, lambda err=err: self._error_handler(f"Audio failed: {err}"))
 
     def _audio_success(self):
         self.gen_audio_btn.config(state=tk.NORMAL)
@@ -511,7 +512,8 @@ class AvatarGeneratorGUI(tk.Tk):
             self.after(0, self._render_success)
 
         except Exception as e:
-            self.after(0, lambda: self._error_handler(f"Render failed: {e}"))
+            err = str(e)
+            self.after(0, lambda err=err: self._error_handler(f"Render failed: {err}"))
 
     def _render_success(self):
         self.generate_btn.config(state=tk.NORMAL)

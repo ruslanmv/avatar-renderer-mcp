@@ -16,17 +16,6 @@ Website:
 
 License:
     Apache-2.0
-
-Examples:
-    >>> # Load settings from environment
-    >>> settings = Settings()
-    >>> print(settings.MODEL_ROOT)
-    PosixPath('/models')
-
-    >>> # Override settings programmatically (useful for testing)
-    >>> test_settings = Settings(CELERY_BROKER_URL="redis://localhost:6379/1")
-    >>> print(test_settings.CELERY_BROKER_URL)
-    redis://localhost:6379/1
 """
 
 from __future__ import annotations
@@ -36,22 +25,21 @@ from pathlib import Path
 from typing import Optional
 
 from pydantic import Field, field_validator
-from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Configure module-level logger
 logger = logging.getLogger(__name__)
 
+# -----------------------------------------------------------------------------
+# Dynamic Path Calculation
+# -----------------------------------------------------------------------------
+# Resolves to the project root (e.g., /mnt/c/blog/avatar-renderer-mcp)
+# __file__ = app/settings.py -> parent = app -> parent = project root
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 
 class Settings(BaseSettings):
     """Application-wide configuration settings.
-
-    This class defines all configurable parameters for the avatar rendering system,
-    including paths to model checkpoints, GPU settings, Celery configuration,
-    and MCP integration options.
-
-    All settings can be overridden via environment variables. The naming convention
-    is case-insensitive, so both LOG_LEVEL and log_level will work.
 
     Attributes:
         LOG_LEVEL: Python logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL).
@@ -62,11 +50,6 @@ class Settings(BaseSettings):
         CELERY_BACKEND_URL: Celery result backend URL.
         CELERY_CONCURRENCY: Number of concurrent Celery worker processes.
         MODEL_ROOT: Root directory containing all model checkpoints.
-        FOMM_CKPT_DIR: Directory for FOMM model checkpoints.
-        DIFF2LIP_CKPT_DIR: Directory for Diff2Lip model checkpoints.
-        SADTALKER_CKPT_DIR: Directory for SadTalker model checkpoints.
-        WAV2LIP_CKPT: Path to Wav2Lip model checkpoint file.
-        GFPGAN_CKPT: Path to GFPGAN face enhancement model checkpoint.
         FFMPEG_BIN: Path to FFmpeg binary for video encoding.
         MCP_ENABLE: Whether to enable the MCP STDIO server.
         MCP_TOOL_NAME: Tool name advertised to MCP Gateway.
@@ -138,35 +121,37 @@ class Settings(BaseSettings):
     # Model Checkpoint Paths
     # ─────────────────────────────────────────────────────────────────────────
 
+    # FIX: Use dynamic project root instead of hardcoded absolute path
     MODEL_ROOT: Path = Field(
-        default=Path("/models"),
-        description="Root directory containing all model checkpoints (read-only mount in K8s)",
+        default_factory=lambda: PROJECT_ROOT / "models",
+        description="Root directory containing all model checkpoints",
     )
 
-    FOMM_CKPT_DIR: Path = Field(
-        default=Path("/models/fomm"),
-        description="Directory containing FOMM (First Order Motion Model) checkpoints",
-    )
+    # Properties are used for sub-paths to ensure they always follow MODEL_ROOT
+    @property
+    def FOMM_CKPT_DIR(self) -> Path:
+        """Directory for FOMM (First Order Motion Model) checkpoints."""
+        return self.MODEL_ROOT / "fomm"
 
-    DIFF2LIP_CKPT_DIR: Path = Field(
-        default=Path("/models/diff2lip"),
-        description="Directory containing Diff2Lip diffusion model checkpoints",
-    )
+    @property
+    def DIFF2LIP_CKPT_DIR(self) -> Path:
+        """Directory for Diff2Lip diffusion model checkpoints."""
+        return self.MODEL_ROOT / "diff2lip"
 
-    SADTALKER_CKPT_DIR: Path = Field(
-        default=Path("/models/sadtalker"),
-        description="Directory containing SadTalker model checkpoints",
-    )
+    @property
+    def SADTALKER_CKPT_DIR(self) -> Path:
+        """Directory for SadTalker model checkpoints."""
+        return self.MODEL_ROOT / "sadtalker"
 
-    WAV2LIP_CKPT: Path = Field(
-        default=Path("/models/wav2lip/wav2lip_gan.pth"),
-        description="Full path to Wav2Lip GAN checkpoint file",
-    )
+    @property
+    def WAV2LIP_CKPT(self) -> Path:
+        """Path to Wav2Lip GAN checkpoint file."""
+        return self.MODEL_ROOT / "wav2lip" / "wav2lip_gan.pth"
 
-    GFPGAN_CKPT: Path = Field(
-        default=Path("/models/gfpgan/GFPGANv1.3.pth"),
-        description="Full path to GFPGAN face enhancement checkpoint file",
-    )
+    @property
+    def GFPGAN_CKPT(self) -> Path:
+        """Path to GFPGAN face enhancement checkpoint file."""
+        return self.MODEL_ROOT / "gfpgan" / "GFPGANv1.3.pth"
 
     # ─────────────────────────────────────────────────────────────────────────
     # FFmpeg Configuration
@@ -224,57 +209,10 @@ class Settings(BaseSettings):
     # Field Validators
     # ─────────────────────────────────────────────────────────────────────────
 
-    @field_validator(
-        "FOMM_CKPT_DIR",
-        "DIFF2LIP_CKPT_DIR",
-        "SADTALKER_CKPT_DIR",
-        "WAV2LIP_CKPT",
-        "GFPGAN_CKPT",
-        mode="after",
-    )
-    @classmethod
-    def validate_model_paths(cls, value: Path, info: FieldInfo) -> Path:
-        """Validate that model checkpoint paths exist.
-
-        This validator logs a warning if a model path doesn't exist at initialization,
-        but doesn't fail validation. This allows the application to start even if
-        some models are missing, with runtime errors occurring only when those
-        specific models are actually needed.
-
-        Args:
-            value: The path to validate.
-            info: Field metadata containing the field name.
-
-        Returns:
-            The validated Path object (unchanged).
-
-        Note:
-            This is a soft validation - warnings are logged but the application
-            continues to initialize.
-        """
-        if not value.exists():
-            logger.warning(
-                "Model path '%s' (%s) does not exist at initialization. "
-                "The path will be checked again at runtime.",
-                info.field_name,
-                value,
-            )
-        return value
-
     @field_validator("LOG_LEVEL", mode="after")
     @classmethod
     def validate_log_level(cls, value: str) -> str:
-        """Validate and normalize the log level.
-
-        Args:
-            value: The log level string to validate.
-
-        Returns:
-            The uppercase log level string.
-
-        Raises:
-            ValueError: If the log level is not a valid Python logging level.
-        """
+        """Validate and normalize the log level."""
         value = value.upper()
         valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
         if value not in valid_levels:
@@ -297,23 +235,41 @@ class Settings(BaseSettings):
         validate_default=True,
     )
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.configure_logging()
+        self._validate_model_paths()
+
     def configure_logging(self) -> None:
-        """Configure application-wide logging based on LOG_LEVEL setting.
-
-        This method should be called early in the application lifecycle to set up
-        consistent logging across all modules.
-
-        Example:
-            >>> settings = Settings()
-            >>> settings.configure_logging()
-            >>> logging.info("Logging is now configured")
-        """
+        """Configure application-wide logging based on LOG_LEVEL setting."""
         logging.basicConfig(
             level=getattr(logging, self.LOG_LEVEL),
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
         )
-        logger.info("Logging configured with level: %s", self.LOG_LEVEL)
+        # Prevent double logging if re-initialized
+        logger.setLevel(getattr(logging, self.LOG_LEVEL))
+
+    def _validate_model_paths(self):
+        """Validate that model checkpoint paths exist at runtime."""
+        checks = [
+            ("FOMM_CKPT_DIR", self.FOMM_CKPT_DIR),
+            ("DIFF2LIP_CKPT_DIR", self.DIFF2LIP_CKPT_DIR),
+            ("SADTALKER_CKPT_DIR", self.SADTALKER_CKPT_DIR),
+            ("WAV2LIP_CKPT", self.WAV2LIP_CKPT),
+            ("GFPGAN_CKPT", self.GFPGAN_CKPT),
+        ]
+
+        for name, path in checks:
+            if not path.exists():
+                logger.warning(
+                    "Model path '%s' (%s) does not exist at initialization. "
+                    "The path will be checked again at runtime.",
+                    name,
+                    path,
+                )
+            else:
+                logger.info("Model found: %s -> %s", name, path)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -322,6 +278,3 @@ class Settings(BaseSettings):
 
 # Singleton settings instance used throughout the application
 settings = Settings()
-
-# Configure logging immediately upon import
-settings.configure_logging()

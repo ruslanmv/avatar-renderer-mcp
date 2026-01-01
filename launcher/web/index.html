@@ -3,151 +3,119 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Avatar Renderer - Modern Launcher</title>
+    <title>Avatar Renderer Studio</title>
     <link rel="stylesheet" href="css/styles.css">
     <script type="text/javascript" src="/eel.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 </head>
 <body>
-    <div class="container">
-        <!-- Header -->
-        <header class="header">
-            <div class="header-content">
-                <h1>🎬 Avatar Renderer</h1>
-                <p class="subtitle">Multilingual Text-to-Avatar Video Generator</p>
+    <div class="app-container">
+        <aside class="sidebar">
+            <div class="brand">
+                <h1>🤖 AvatarStudio</h1>
+                <p>AI Video Generator</p>
             </div>
-            <div class="status-indicator">
-                <span id="api-status" class="status-badge checking">Checking API...</span>
+            
+            <div class="status-panel">
+                <div class="status-item">
+                    <span class="label">API Status</span>
+                    <span id="api-status" class="badge checking">Connecting...</span>
+                </div>
+                <div class="status-item">
+                    <span class="label">Engine</span>
+                    <span class="badge ready">Ready</span>
+                </div>
             </div>
-        </header>
 
-        <!-- Main Content -->
+            <div class="preview-box">
+                <label>Avatar Preview</label>
+                <div class="img-wrapper">
+                    <img id="avatar-preview-img" src="img/placeholder.png" alt="Avatar" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjMzMzIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGRvbWluYW50LWJhc2VsaW5lPSJtaWRkbGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM2NjYiPk5vIEltYWdlPC90ZXh0Pjwvc3ZnPg=='">
+                </div>
+            </div>
+        </aside>
+
         <main class="main-content">
-            <!-- Step 1: Text & Voice -->
-            <section class="card">
-                <div class="card-header">
-                    <h2>📝 Step 1: Text & Voice</h2>
+            
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>1. Script & Audio</h2>
                 </div>
-                <div class="card-body">
-                    <!-- Language and Voice Selection -->
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="language">Language</label>
-                            <select id="language" class="form-control">
-                                <option value="en">🇬🇧 English</option>
-                            </select>
+                <div class="panel-body">
+                    <div class="controls-row">
+                        <div class="control-group">
+                            <label>Language</label>
+                            <select id="language"></select>
                         </div>
-                        <div class="form-group">
-                            <label for="voice">Voice Profile</label>
-                            <select id="voice" class="form-control">
-                                <option value="sophia">🎀 Sophia – Friendly (Female)</option>
-                            </select>
+                        <div class="control-group">
+                            <label>Voice Persona</label>
+                            <select id="voice"></select>
                         </div>
                     </div>
 
-                    <!-- Sample Texts -->
-                    <div class="sample-buttons" id="sample-buttons">
-                        <button class="btn btn-secondary btn-sm" onclick="loadSample('greeting')">Greeting</button>
-                        <button class="btn btn-secondary btn-sm" onclick="loadSample('professional')">Professional</button>
-                    </div>
+                    <div class="samples-row" id="sample-buttons"></div>
 
-                    <!-- Text Input -->
-                    <div class="form-group">
-                        <label for="text-input">Text to Speak</label>
-                        <textarea id="text-input" class="form-control" rows="5"
-                            placeholder="Enter the text you want your avatar to speak...">Hello! I am ready to create a video.</textarea>
-                    </div>
-
-                    <!-- Audio Controls -->
-                    <div class="action-row">
-                        <button id="generate-audio-btn" class="btn btn-primary" onclick="generateAudio()">
-                            🎵 Generate Audio
+                    <textarea id="text-input" placeholder="Type what you want your avatar to say..."></textarea>
+                    
+                    <div class="action-bar">
+                        <button id="generate-audio-btn" class="btn primary" onclick="generateAudio()">
+                            <span>🔊</span> Generate Audio
                         </button>
-                        <div id="audio-player-container" style="display: none;">
-                            <audio id="audio-player" controls></audio>
+                        <audio id="audio-player" controls style="display:none"></audio>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>2. Configuration</h2>
+                </div>
+                <div class="panel-body">
+                    <div class="controls-row">
+                        <div class="control-group">
+                            <label>Source Image Path</label>
+                            <div class="file-input">
+                                <input type="text" id="avatar-path" readonly placeholder="Select an image...">
+                                <button class="btn secondary" onclick="document.getElementById('avatar-file').click()">Browse</button>
+                                <input type="file" id="avatar-file" accept="image/*" style="display:none" onchange="handleAvatarSelect(this)">
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label>Render Quality</label>
+                            <select id="quality"></select>
                         </div>
                     </div>
                 </div>
-            </section>
+            </div>
 
-            <!-- Step 2: Avatar & Settings -->
-            <section class="card">
-                <div class="card-header">
-                    <h2>🖼️ Step 2: Avatar & Settings</h2>
+            <div class="panel highlight">
+                <div class="panel-header">
+                    <h2>3. Render Video</h2>
                 </div>
-                <div class="card-body">
-                    <!-- Avatar Selection -->
-                    <div class="form-group">
-                        <label for="avatar-path">Source Image</label>
-                        <div class="file-input-group">
-                            <input type="text" id="avatar-path" class="form-control" readonly>
-                            <input type="file" id="avatar-file" accept="image/png,image/jpeg,image/jpg"
-                                style="display: none;" onchange="handleAvatarSelect(this)">
-                            <button class="btn btn-secondary" onclick="document.getElementById('avatar-file').click()">
-                                Browse
-                            </button>
-                        </div>
-                        <small class="form-hint">Supported formats: PNG, JPG, JPEG</small>
+                <div class="panel-body">
+                    <div id="progress-container" class="hidden">
+                        <div class="progress-bar"><div id="progress-fill"></div></div>
+                        <p id="progress-text">Initializing...</p>
                     </div>
 
-                    <!-- Quality Settings -->
-                    <div class="form-group">
-                        <label for="quality">Render Quality</label>
-                        <select id="quality" class="form-control">
-                            <option value="auto">🔄 Auto (Automatic)</option>
-                            <option value="real_time">⚡ Real-time (Fast)</option>
-                            <option value="high_quality">✨ High Quality (Best)</option>
-                        </select>
-                        <small class="form-hint">Note: High Quality takes significantly longer to render</small>
+                    <div id="video-result-container" class="hidden">
+                        <video id="video-player" controls></video>
                     </div>
 
-                    <!-- Output Directory -->
-                    <div class="form-group">
-                        <label>Output Directory</label>
-                        <input type="text" id="output-dir" class="form-control" readonly>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Step 3: Generate -->
-            <section class="card">
-                <div class="card-header">
-                    <h2>🎬 Step 3: Generate Video</h2>
-                </div>
-                <div class="card-body">
-                    <!-- Progress Bar -->
-                    <div id="progress-container" style="display: none;">
-                        <div class="progress-bar">
-                            <div id="progress-fill" class="progress-fill"></div>
-                        </div>
-                        <p id="progress-text" class="progress-text">Processing...</p>
-                    </div>
-
-                    <!-- Logs -->
-                    <div class="log-container">
-                        <div id="log-output" class="log-output">
-                            <p class="log-line info">Ready to generate video...</p>
-                        </div>
-                    </div>
-
-                    <!-- Actions -->
-                    <div class="action-row">
-                        <button id="generate-video-btn" class="btn btn-success btn-lg" onclick="generateVideo()">
-                            🎬 START RENDER
+                    <div class="render-actions">
+                        <button id="generate-video-btn" class="btn success large" onclick="generateVideo()">
+                            🎬 Generate Video
                         </button>
-                        <button class="btn btn-secondary" onclick="openOutputFolder()">
-                            📂 Open Output Folder
-                        </button>
+                        <div class="post-render-actions">
+                            <button class="btn secondary" onclick="openVideoFile()">▶ Open Player</button>
+                            <button class="btn secondary" onclick="openOutputFolder()">📂 Open Folder</button>
+                        </div>
                     </div>
                 </div>
-            </section>
+            </div>
+
         </main>
-
-        <!-- Footer -->
-        <footer class="footer">
-            <p>Avatar Renderer v0.1.0 | Made with ❤️ by <a href="https://ruslanmv.com" target="_blank">Ruslan Magana</a></p>
-        </footer>
     </div>
-
     <script src="js/app.js"></script>
 </body>
 </html>
