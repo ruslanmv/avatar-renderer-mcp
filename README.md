@@ -587,6 +587,9 @@ export LOG_LEVEL=DEBUG
 make run
 ```
 
+## Demo
+
+![](assets/2026-01-01-02-22-51.png)
 ---
 
 ## Roadmap
