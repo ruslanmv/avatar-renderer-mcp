@@ -5,6 +5,8 @@
     --primary: #6366f1;
     --primary-hover: #4f46e5;
     --success: #10b981;
+    --danger: #ef4444;
+    --danger-hover: #dc2626;
     --text-main: #ffffff;
     --text-dim: #a1a1aa;
     --border: #333;
@@ -71,7 +73,7 @@ body {
     background: var(--bg-panel);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    overflow: hidden;
+    /* REMOVED overflow: hidden to prevent clipping content */
 }
 
 .panel-header {
@@ -118,16 +120,18 @@ select:focus, input:focus, textarea:focus { outline: 2px solid var(--primary); b
 .btn.secondary:hover { background: #3d3d3d; }
 .btn.success { background: var(--success); color: #000; font-weight: 700; width: 100%; }
 .btn.success:hover { opacity: 0.9; }
+.btn.danger { background: var(--bg-hover); color: #ef4444; border: 1px solid #ef4444; }
+.btn.danger:hover { background: var(--danger); color: white; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-sm { padding: 6px 12px; font-size: 0.85rem; }
 
 /* Render Area */
 #video-player { width: 100%; max-height: 400px; background: #000; margin-bottom: 15px; border-radius: 6px; }
 .render-actions { margin-top: 20px; }
-.post-render-actions { display: flex; gap: 10px; margin-top: 15px; }
+.post-render-actions { display: flex; gap: 10px; margin-top: 15px; flex-wrap: wrap; }
 
 .progress-bar { height: 6px; background: #333; border-radius: 3px; overflow: hidden; margin-bottom: 10px; }
 .progress-fill { height: 100%; background: var(--primary); width: 0%; transition: width 0.3s; animation: pulse 2s infinite; }
-.hidden { display: none; }
+.hidden { display: none !important; }
 
 @keyframes pulse { 0% { opacity: 0.6; } 50% { opacity: 1; } 100% { opacity: 0.6; } }

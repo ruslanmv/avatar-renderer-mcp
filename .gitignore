@@ -250,3 +250,5 @@ token.json
 * copy * 
 
 *.pth
+launcher/web/cache/preview_audio.wav
+*.wav

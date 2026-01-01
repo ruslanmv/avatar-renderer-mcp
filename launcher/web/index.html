@@ -30,7 +30,7 @@
             <div class="preview-box">
                 <label>Avatar Preview</label>
                 <div class="img-wrapper">
-                    <img id="avatar-preview-img" src="img/placeholder.png" alt="Avatar" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjMzMzIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGRvbWluYW50LWJhc2VsaW5lPSJtaWRkbGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM2NjYiPk5vIEltYWdlPC90ZXh0Pjwvc3ZnPg=='">
+                    <img id="avatar-preview-img" src="img/placeholder.png" alt="Avatar">
                 </div>
             </div>
         </aside>
@@ -106,9 +106,11 @@
                         <button id="generate-video-btn" class="btn success large" onclick="generateVideo()">
                             🎬 Generate Video
                         </button>
-                        <div class="post-render-actions">
+                        
+                        <div id="post-render-actions" class="post-render-actions hidden">
                             <button class="btn secondary" onclick="openVideoFile()">▶ Open Player</button>
                             <button class="btn secondary" onclick="openOutputFolder()">📂 Open Folder</button>
+                            <button class="btn danger" onclick="deleteVideo()">🗑️ Delete / Reset</button>
                         </div>
                     </div>
                 </div>

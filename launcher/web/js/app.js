@@ -11,11 +11,10 @@ async function initApp() {
         // Defaults
         document.getElementById('language').value = 'en';
         document.getElementById('voice').value = 'sophia';
-        document.getElementById('quality').value = 'real_time';
+        document.getElementById('quality').value = 'high_quality';
         
         if(config.default_avatar) {
             document.getElementById('avatar-path').value = config.default_avatar;
-            // Force avatar preview update if file exists
             await eel.set_avatar_path(config.default_avatar)().then(res => {
                 if(res.status === 'success') document.getElementById('avatar-preview-img').src = res.preview_url;
             });
@@ -79,9 +78,10 @@ async function checkHealth() {
 }
 
 async function handleAvatarSelect(input) {
-    if(input.files[0]) {
-        const path = input.files[0].path || input.files[0].name; // .path works in Electron/Eel usually
-        // If browser doesn't give full path due to security, user must use the Browse button or type path
+    if(input.files && input.files.length > 0) {
+        const file = input.files[0];
+        const path = file.path || file.name; 
+        
         if(!path) return; 
 
         const res = await eel.set_avatar_path(path)();
@@ -92,6 +92,7 @@ async function handleAvatarSelect(input) {
             alert("Error: " + res.error);
         }
     }
+    input.value = ''; 
 }
 
 async function generateAudio() {
@@ -125,12 +126,14 @@ async function generateVideo() {
     const prog = document.getElementById('progress-container');
     const resultContainer = document.getElementById('video-result-container');
     const videoPlayer = document.getElementById('video-player');
+    const postActions = document.getElementById('post-render-actions');
 
     btn.disabled = true;
+    btn.innerHTML = 'Rendering...';
     prog.classList.remove('hidden');
     resultContainer.classList.add('hidden');
+    postActions.classList.add('hidden'); // Hide delete buttons while generating
     
-    // Simulate progress bar animation
     const fill = document.getElementById('progress-fill');
     fill.style.width = '20%';
     
@@ -140,15 +143,38 @@ async function generateVideo() {
     const res = await eel.generate_video(avatar, quality)();
 
     btn.disabled = false;
+    btn.innerHTML = '🎬 Generate Video';
     prog.classList.add('hidden');
     fill.style.width = '0%';
 
     if(res.status === 'success') {
         resultContainer.classList.remove('hidden');
+        postActions.classList.remove('hidden'); // Show delete buttons
         videoPlayer.src = res.preview_url;
         videoPlayer.play();
     } else {
         alert("Render Failed: " + res.error);
+    }
+}
+
+async function deleteVideo() {
+    if(!confirm("Are you sure you want to delete this generated video?")) return;
+
+    const res = await eel.delete_generated_video()();
+    if (res.status === 'success') {
+        // Reset UI
+        const resultContainer = document.getElementById('video-result-container');
+        const videoPlayer = document.getElementById('video-player');
+        const postActions = document.getElementById('post-render-actions');
+        
+        videoPlayer.pause();
+        videoPlayer.src = "";
+        resultContainer.classList.add('hidden');
+        postActions.classList.add('hidden'); // Hide buttons again
+        
+        document.getElementById('progress-text').textContent = "Ready to generate...";
+    } else {
+        alert("Failed to delete: " + res.error);
     }
 }
 
@@ -160,8 +186,9 @@ async function openVideoFile() { await eel.open_video_file()(); }
 eel.expose(update_status);
 function update_status(msg) {
     document.getElementById('progress-text').textContent = msg;
-    // visual feedback on progress bar
-    document.getElementById('progress-fill').style.width = '60%'; 
+    const fill = document.getElementById('progress-fill');
+    if(msg.includes("Initializing")) fill.style.width = '30%';
+    if(msg.includes("Rendering")) fill.style.width = '60%'; 
 }
 
 window.addEventListener('DOMContentLoaded', initApp);

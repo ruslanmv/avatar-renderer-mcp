@@ -71,9 +71,9 @@ SAMPLE_TEXTS = {
 }
 
 QUALITY_MODES = {
-    "auto": "🔄 Auto (Balanced)",
-    "real_time": "⚡ Real-time (Fastest)",
     "high_quality": "✨ High Quality (Best Visuals)",
+    "real_time": "⚡ Real-time (Fastest)",
+    "auto": "🔄 Auto (Balanced)",
 }
 
 # ============================================================================
@@ -122,12 +122,10 @@ def get_config():
 @eel.expose
 def check_api_health():
     try:
-        # Check basic liveness
         response = requests.get(f"{API_BASE_URL}/health/live", timeout=2) 
         if response.status_code == 200:
             return {"status": "online", "code": 200}
         
-        # Fallback check
         response = requests.get(f"{API_BASE_URL}/docs", timeout=2)
         return {"status": "online", "code": response.status_code}
     except Exception as e:
@@ -151,6 +149,32 @@ def open_video_file():
         return {"status": "error", "error": "No video found"}
 
 @eel.expose
+def delete_generated_video():
+    """Deletes the current generated video and its cache."""
+    try:
+        # 1. Delete the actual output file if it exists in state
+        if state.output_video_path and state.output_video_path.exists():
+            try:
+                state.output_video_path.unlink()
+            except Exception as e:
+                print(f"[WARN] Failed to delete output video: {e}")
+        
+        # 2. Delete the cache file used for preview
+        cache_video = WEB_DIR / "cache" / "preview_video.mp4"
+        if cache_video.exists():
+            try:
+                cache_video.unlink()
+            except Exception as e:
+                print(f"[WARN] Failed to delete cache video: {e}")
+
+        # 3. Reset state
+        state.output_video_path = None
+        return {"status": "success", "message": "Video deleted successfully"}
+        
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+@eel.expose
 def generate_audio(text: str, language: str, voice_profile: str):
     try:
         if not text.strip():
@@ -158,14 +182,13 @@ def generate_audio(text: str, language: str, voice_profile: str):
 
         voice_data = VOICE_PROFILES.get(voice_profile, VOICE_PROFILES["neutral"])
 
-        # FIX: Corrected keys to match app/api.py TextToAudioRequest model
         payload = {
-            "text": text,          # Was "input" (WRONG) -> Now "text" (CORRECT)
+            "text": text,
             "language": language,
             "voice": voice_data["voice"],
             "temperature": voice_data["temperature"],
             "speed": voice_data["speed"],
-            "output_format": "file" # Was "response_format": "wav" (WRONG) -> Now "output_format": "file"
+            "output_format": "file"
         }
 
         # Call API
@@ -175,24 +198,17 @@ def generate_audio(text: str, language: str, voice_profile: str):
         if response.status_code == 200:
             data = response.json()
             if "audio_path" in data and data["audio_path"]:
-                 # Server returns the path to the generated file
                  server_audio_path = Path(data["audio_path"])
-                 
-                 # Read bytes from server path (since we are on same machine)
-                 # Note: If client/server were separate, we'd need to download bytes or base64
                  if server_audio_path.exists():
                      audio_content = server_audio_path.read_bytes()
                  else:
                      return {"status": "error", "error": f"Audio file not found at {server_audio_path}"}
             elif "audio_base64" in data and data["audio_base64"]:
-                 # Handle base64 if configured that way
                  import base64
                  audio_content = base64.b64decode(data["audio_base64"])
             else:
                  return {"status": "error", "error": "API response missing audio data"}
-                 
         else:
-            # Handle Errors (422, 500, etc)
             try:
                 err_detail = response.json().get('detail', response.text)
             except:
@@ -211,8 +227,8 @@ def generate_audio(text: str, language: str, voice_profile: str):
 
         return {
             "status": "success",
-            "audio_path": str(local_path), # Absolute path
-            "preview_url": "cache/preview_audio.wav?t=" + str(time.time()), # Relative for browser
+            "audio_path": str(local_path),
+            "preview_url": "cache/preview_audio.wav?t=" + str(time.time()),
             "message": "Audio generated successfully!"
         }
 
@@ -227,8 +243,8 @@ def generate_video(avatar_path: str, quality_mode: str):
         if state.is_generating:
             return {"status": "error", "error": "Generation in progress"}
 
-        # Validate Inputs
         img_path = Path(avatar_path) if avatar_path else state.avatar_image_path
+        
         if not img_path or not img_path.exists():
             return {"status": "error", "error": "Invalid avatar image path"}
         
@@ -238,19 +254,16 @@ def generate_video(avatar_path: str, quality_mode: str):
         state.is_generating = True
         eel.update_status("Initializing AI engine...")
 
-        # Lazy import to speed up initial launch
         try:
-            # Import your pipeline here
             from app.pipeline import render_pipeline 
         except ImportError as e:
             state.is_generating = False
             return {"status": "error", "error": f"Backend pipeline import failed: {e}"}
 
-        # Output Path
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         video_out = OUTPUT_DIR / f"avatar_{timestamp}.mp4"
 
-        eel.update_status(f"Rendering ({QUALITY_MODES[quality_mode]})... This may take time.")
+        eel.update_status(f"Rendering ({QUALITY_MODES.get(quality_mode, quality_mode)})... This may take time.")
 
         # --- EXECUTE PIPELINE ---
         result_path = render_pipeline(
@@ -263,7 +276,6 @@ def generate_video(avatar_path: str, quality_mode: str):
         state.output_video_path = Path(result_path)
         state.is_generating = False
         
-        # Create cache copy for browser preview
         cache_video = WEB_DIR / "cache" / "preview_video.mp4"
         shutil.copy(result_path, cache_video)
 
@@ -283,15 +295,14 @@ def generate_video(avatar_path: str, quality_mode: str):
 @eel.expose
 def set_avatar_path(path: str):
     try:
-        # Strip quotes if copied as path
         clean_path = path.strip('"').strip("'")
         p = Path(clean_path)
+        
         if p.exists() and p.is_file():
             state.avatar_image_path = p
-            # Create preview for browser
             cache_img = WEB_DIR / "cache" / "preview_avatar.png"
-            # Copy to cache for preview
             shutil.copy(p, cache_img)
+            
             return {
                 "status": "success", 
                 "path": str(p),
@@ -315,7 +326,6 @@ def main():
         print("[INFO] Starting Launcher...")
         eel.init(str(WEB_DIR))
         
-        # Clean cache on startup
         cache_dir = WEB_DIR / "cache"
         if cache_dir.exists():
             for f in cache_dir.glob("*"):
@@ -326,8 +336,8 @@ def main():
             'index.html',
             size=(1280, 850),
             port=8080,
-            mode='chrome', # Prefer Chrome
-            cmdline_args=['--disable-http-cache'] # Prevent caching issues for previews
+            mode='chrome',
+            cmdline_args=['--disable-http-cache'] 
         )
     except Exception as e:
         print(f"[FATAL] {e}")

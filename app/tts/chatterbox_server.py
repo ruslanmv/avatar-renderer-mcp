@@ -1,7 +1,9 @@
+# app/tts/chatterbox_server.py
 from __future__ import annotations
 
 import argparse
 import asyncio
+import inspect
 import logging
 import os
 import re
@@ -11,12 +13,11 @@ import warnings
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from io import BytesIO
-from typing import AsyncIterator, Literal, Optional
+from typing import Any, AsyncIterator, Literal, Optional
 
 # -----------------------------------------------------------------------------
 # WARNING FILTERS (Clean up logs)
 # -----------------------------------------------------------------------------
-# Filter annoying library warnings specific to Transfromers/Diffusers/Torch
 warnings.filterwarnings("ignore", category=UserWarning, module="librosa")
 warnings.filterwarnings("ignore", category=FutureWarning, module="diffusers")
 warnings.filterwarnings("ignore", category=FutureWarning, module="transformers")
@@ -34,21 +35,18 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 # IMPORTANT: Import the multilingual version
-# Assuming this exists in your python path
 try:
     from chatterbox.mtl_tts import ChatterboxMultilingualTTS
 except ImportError:
     print("CRITICAL ERROR: Could not import 'chatterbox.mtl_tts'. Ensure your python path is correct.")
-    exit(1)
+    raise
 
 
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
-
 logger = logging.getLogger("vr_chatterbox_server_multilingual")
 
-# Supported languages (23 total)
 SUPPORTED_LANGUAGES = {
     "ar": "Arabic", "da": "Danish", "de": "German", "el": "Greek", "en": "English",
     "es": "Spanish", "fi": "Finnish", "fr": "French", "he": "Hebrew", "hi": "Hindi",
@@ -57,7 +55,6 @@ SUPPORTED_LANGUAGES = {
     "sv": "Swedish", "sw": "Swahili", "tr": "Turkish", "zh": "Chinese",
 }
 
-# Project base / voices dir
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VOICES_DIR = os.path.join(BASE_DIR, "voices")
 
@@ -71,6 +68,14 @@ CHUNK_SIZE = FAST_CHUNK_SIZE if FAST_MODE else DEFAULT_CHUNK_SIZE
 # Voice fine-tuning
 FEMALE_EXAGGERATION_BASE = float(os.getenv("CHATTERBOX_FEMALE_EXAGGERATION", "0.45"))
 MALE_EXAGGERATION_BASE = float(os.getenv("CHATTERBOX_MALE_EXAGGERATION", "0.30"))
+
+# Post-processing (standard production fix for “whisper/noise at end”)
+TRIM_END_SILENCE = os.getenv("CHATTERBOX_TRIM_END_SILENCE", "true").lower() == "true"
+TRIM_DB = float(os.getenv("CHATTERBOX_TRIM_DB", "-45"))          # silence threshold in dBFS
+TRIM_PAD_MS = int(os.getenv("CHATTERBOX_TRIM_PAD_MS", "80"))     # keep a little tail
+FADE_MS = int(os.getenv("CHATTERBOX_FADE_MS", "12"))             # fade-in/out to prevent clicks
+HIGHPASS_HZ = int(os.getenv("CHATTERBOX_HIGHPASS_HZ", "25"))     # remove rumble/DC-ish
+PCM_STREAM = os.getenv("CHATTERBOX_STREAM_PCM", "true").lower() == "true"
 
 # Sentence splitting
 SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[\.!?。！？])\s+")
@@ -102,7 +107,6 @@ def detect_device(explicit: Optional[str] = None) -> str:
 # -----------------------------------------------------------------------------
 # Request/Response Models
 # -----------------------------------------------------------------------------
-
 VoiceType = Literal["female", "male", "neutral"]
 LanguageCode = Literal[
     "ar", "da", "de", "el", "en", "es", "fi", "fr", "he", "hi",
@@ -113,18 +117,17 @@ LanguageCode = Literal[
 
 class SpeechRequest(BaseModel):
     """Request schema for multilingual TTS generation."""
-
     input: str = Field(..., description="Text to synthesize.", min_length=1, max_length=5000)
     language: LanguageCode = Field("en", description="Language code for synthesis.")
     voice: VoiceType = Field("neutral", description="Voice profile: 'female', 'male', or 'neutral'.")
-    
+
     # Generation parameters
     temperature: float = Field(0.7, ge=0.1, le=1.5, description="Sampling temperature.")
     cfg_weight: float = Field(0.4, ge=0.0, le=2.0, description="Guidance weight.")
     exaggeration: float = Field(0.3, ge=0.0, le=1.0, description="Expressiveness level.")
-    speed: float = Field(1.0, ge=0.5, le=2.0, description="Speech speed multiplier.")
-    
-    # Advanced Sampling
+    speed: float = Field(1.0, ge=0.5, le=2.0, description="Speech speed multiplier (see note).")
+
+    # Advanced sampling (passed through if supported by model.generate)
     top_p: float = Field(0.9, ge=0.0, le=1.0, description="Nucleus sampling probability.")
     top_k: int = Field(50, ge=0, description="Top-K sampling.")
     repetition_penalty: float = Field(1.2, ge=1.0, le=2.0, description="Penalty for repetition.")
@@ -158,23 +161,18 @@ class LanguagesResponse(BaseModel):
 # -----------------------------------------------------------------------------
 # Voice Profile Manager (Multilingual)
 # -----------------------------------------------------------------------------
-
-
 class VoiceProfileManager:
     """Manages pre-loaded voice profiles with language awareness."""
 
     def __init__(self, model: ChatterboxMultilingualTTS):
         self.model = model
 
-        # Ensure directory exists
         if not os.path.exists(VOICES_DIR):
             try:
                 os.makedirs(VOICES_DIR, exist_ok=True)
-                # Only log if we just created it
             except OSError:
                 pass
 
-        # Default paths relative to app/voices/
         default_female = os.path.join(VOICES_DIR, "female.wav")
         default_male = os.path.join(VOICES_DIR, "male.wav")
 
@@ -192,13 +190,13 @@ class VoiceProfileManager:
                 path = os.path.abspath(path)
                 self.profiles[voice_type] = path
 
-            # Check existence
             if path and os.path.exists(path):
                 try:
                     logger.info("Loading %s voice profile from: %s", voice_type, path)
                     prep_exaggeration = (
                         FEMALE_EXAGGERATION_BASE if voice_type == "female" else MALE_EXAGGERATION_BASE
                     )
+                    # prepare_conditionals can be heavy; keep it inside init stage
                     self.model.prepare_conditionals(path, exaggeration=prep_exaggeration)
                     self.prepared[voice_type] = True
                     logger.info("✓ %s voice profile loaded", voice_type.capitalize())
@@ -207,7 +205,6 @@ class VoiceProfileManager:
                     self.prepared[voice_type] = False
             else:
                 self.prepared[voice_type] = False
-                # Only log warning if path was actually set/defaulted
                 if path:
                     logger.warning(
                         "%s voice file not found at: %s (Will fallback to neutral)",
@@ -219,17 +216,12 @@ class VoiceProfileManager:
         """Get the path for a specific voice type. Fallback to None (neutral) if missing."""
         if voice == "neutral":
             return None
-        
         path = self.profiles.get(voice)
-        
-        # Ensure file exists before returning it to avoid crashes
         if path and os.path.exists(path):
             return path
-        
         return None
 
     def is_loaded(self, voice: VoiceType) -> bool:
-        """Check if a voice profile is loaded."""
         if voice == "neutral":
             return True
         return self.prepared.get(voice, False)
@@ -238,8 +230,6 @@ class VoiceProfileManager:
 # -----------------------------------------------------------------------------
 # Multilingual TTS Service
 # -----------------------------------------------------------------------------
-
-
 class ChatterboxServiceMultilingual:
     """High-performance multilingual TTS service with streaming."""
 
@@ -252,6 +242,8 @@ class ChatterboxServiceMultilingual:
         self._lock = threading.Lock()
         self._gen_lock = threading.Lock()
         self._initialized = False
+
+        self._generate_sig_params: Optional[set[str]] = None
 
     def initialize(self) -> None:
         """Initialize multilingual model and voice profiles."""
@@ -266,15 +258,18 @@ class ChatterboxServiceMultilingual:
             start = time.time()
 
             try:
-                # Load MULTILINGUAL model
                 self._model = ChatterboxMultilingualTTS.from_pretrained(device=self.device)
-
                 if hasattr(self._model, "eval"):
                     self._model.eval()
 
                 torch.set_grad_enabled(False)
 
-                # Load voice profiles
+                # cache signature of generate() so we only pass supported kwargs
+                try:
+                    self._generate_sig_params = set(inspect.signature(self._model.generate).parameters.keys())
+                except Exception:
+                    self._generate_sig_params = None
+
                 self._voice_manager = VoiceProfileManager(self._model)
                 self._voice_manager.load_all()
 
@@ -283,11 +278,10 @@ class ChatterboxServiceMultilingual:
                 logger.info("✓ ChatterboxMultilingualTTS ready in %.2f seconds", elapsed)
                 logger.info("📚 Supported languages: %d", len(SUPPORTED_LANGUAGES))
             except Exception as e:
-                logger.error(f"Failed to initialize model: {e}")
-                raise e
+                logger.error("Failed to initialize model: %s", e)
+                raise
 
     def shutdown(self) -> None:
-        """Cleanly shutdown internal resources."""
         logger.info("🛑 Shutting down TTS executor...")
         self._executor.shutdown(wait=True, cancel_futures=True)
         logger.info("🛑 TTS executor shutdown complete.")
@@ -295,7 +289,6 @@ class ChatterboxServiceMultilingual:
     @property
     def model(self) -> ChatterboxMultilingualTTS:
         if not self._initialized or self._model is None:
-            # Fallback initialization
             self.initialize()
         assert self._model is not None
         return self._model
@@ -317,19 +310,15 @@ class ChatterboxServiceMultilingual:
     def _split_into_sentences(self, text: str) -> list[tuple[int, int]]:
         if not text:
             return []
-
         spans: list[tuple[int, int]] = []
         last_idx = 0
-
         for match in SENTENCE_SPLIT_PATTERN.finditer(text):
             end_idx = match.start()
             if end_idx > last_idx:
                 spans.append((last_idx, end_idx))
                 last_idx = end_idx
-
         if last_idx < len(text):
             spans.append((last_idx, len(text)))
-
         return spans
 
     def _chunk_text(
@@ -390,6 +379,98 @@ class ChatterboxServiceMultilingual:
             return max(exaggeration, MALE_EXAGGERATION_BASE)
         return exaggeration
 
+    @staticmethod
+    def _ensure_mono(wav: torch.Tensor) -> torch.Tensor:
+        # Expect [T] or [C, T]
+        if wav.dim() == 1:
+            wav = wav.unsqueeze(0)
+        if wav.size(0) > 1:
+            wav = wav.mean(dim=0, keepdim=True)
+        return wav
+
+    @staticmethod
+    def _fade(wav: torch.Tensor, sr: int, fade_ms: int) -> torch.Tensor:
+        if fade_ms <= 0:
+            return wav
+        n = wav.size(-1)
+        fade = int(sr * (fade_ms / 1000.0))
+        if fade <= 1 or fade * 2 >= n:
+            return wav
+        ramp = torch.linspace(0.0, 1.0, fade, device=wav.device, dtype=wav.dtype)
+        wav[..., :fade] *= ramp
+        wav[..., -fade:] *= ramp.flip(0)
+        return wav
+
+    @staticmethod
+    def _trim_end(wav: torch.Tensor, sr: int, trim_db: float, pad_ms: int) -> torch.Tensor:
+        """
+        Trim trailing low-energy region.
+        This is the main “standard fix” for end-of-audio whisper/noise on many generative TTS models.
+        """
+        # wav: [1, T]
+        if wav.numel() == 0:
+            return wav
+
+        eps = 1e-8
+        x = wav[0]
+
+        # Convert dBFS threshold to linear amplitude threshold.
+        # dBFS: 20*log10(|x|). So |x| = 10^(dB/20)
+        thr = float(10.0 ** (trim_db / 20.0))
+
+        # Find last index where amplitude exceeds threshold
+        mask = (x.abs() > thr)
+        if not torch.any(mask):
+            # If everything is below threshold, keep a tiny bit (avoid empty audio)
+            keep = min(x.numel(), int(sr * 0.25))
+            return wav[..., :keep]
+
+        last_idx = int(torch.nonzero(mask, as_tuple=False)[-1].item())
+        pad = int(sr * (pad_ms / 1000.0))
+        end = min(x.numel(), last_idx + 1 + pad)
+        return wav[..., :end]
+
+    def _postprocess(self, wav: torch.Tensor) -> torch.Tensor:
+        """
+        Production-safe postprocessing:
+        - mono mixdown
+        - remove DC/rumble (high-pass)
+        - trim trailing silence/noise tail (prevents “whispering” artifacts at end)
+        - fade in/out to prevent clicks
+        - clamp to [-1, 1]
+        """
+        sr = int(self.model.sr)
+        wav = self._ensure_mono(wav).detach()
+
+        # Some models return slightly out-of-range
+        wav = wav.clamp(-1.2, 1.2)
+
+        # High-pass to reduce rumble / DC-ish drift
+        if HIGHPASS_HZ and HIGHPASS_HZ > 0:
+            try:
+                wav = ta.functional.highpass_biquad(wav, sr, cutoff_freq=float(HIGHPASS_HZ))
+            except Exception:
+                pass
+
+        if TRIM_END_SILENCE:
+            wav = self._trim_end(wav, sr, TRIM_DB, TRIM_PAD_MS)
+
+        wav = self._fade(wav, sr, FADE_MS)
+        wav = wav.clamp(-1.0, 1.0)
+
+        return wav
+
+    def _model_generate(self, **kwargs: Any) -> torch.Tensor:
+        """
+        Call model.generate with only supported kwargs (prevents production breakage if
+        you upgrade chatterbox and signature changes).
+        """
+        if self._generate_sig_params is None:
+            return self.model.generate(**kwargs)
+
+        filtered = {k: v for k, v in kwargs.items() if k in self._generate_sig_params}
+        return self.model.generate(**filtered)
+
     def _generate_chunk(
         self,
         text: str,
@@ -404,29 +485,41 @@ class ChatterboxServiceMultilingual:
     ) -> torch.Tensor:
         """Generate audio for a single text chunk with language support."""
         audio_prompt = self.voice_manager.get_voice_path(voice)
-        
         if voice != "neutral" and audio_prompt is None:
-            logger.debug(f"Voice '{voice}' requested but file missing. Using Neutral.")
+            logger.debug("Voice '%s' requested but file missing. Using Neutral.", voice)
 
         exaggeration = self._apply_voice_shaping(voice, exaggeration)
 
-        # Handle torch inference context safely
         ctx = torch.inference_mode() if hasattr(torch, "inference_mode") else torch.no_grad()
-        
+
         with self._gen_lock:
             with ctx:
-                wav = self.model.generate(
-                    text,
+                wav = self._model_generate(
+                    text=text,
                     language_id=language,
-                    audio_prompt_path=audio_prompt, 
+                    audio_prompt_path=audio_prompt,
                     exaggeration=exaggeration,
                     cfg_weight=cfg_weight,
                     temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    repetition_penalty=repetition_penalty,
                 )
 
-        return wav
+        # Postprocess to remove tail noise / whispers
+        return self._postprocess(wav)
 
-    def _generate_and_encode_chunk(
+    @staticmethod
+    def _to_pcm16le_bytes(wav_mono: torch.Tensor) -> bytes:
+        """
+        Convert float waveform [-1, 1] to signed 16-bit PCM little-endian bytes.
+        wav_mono: [1, T] CPU tensor preferred.
+        """
+        wav_mono = wav_mono.clamp(-1.0, 1.0)
+        x = (wav_mono[0] * 32767.0).round().to(torch.int16).cpu().numpy()
+        return x.tobytes(order="C")
+
+    def _generate_and_encode_chunk_wav(
         self,
         chunk_index: int,
         total_chunks: int,
@@ -441,45 +534,96 @@ class ChatterboxServiceMultilingual:
         top_k: int,
         repetition_penalty: float,
     ) -> bytes:
+        """
+        Encode as WAV (single file).
+        NOTE: WAV-per-chunk streaming is NOT safe for concatenation; it often causes artifacts.
+        We keep this for non-stream mode or when PCM_STREAM is disabled.
+        """
         chunk_start = time.time()
-        
+
         wav = self._generate_chunk(
-            text, language, voice, temperature, cfg_weight, 
-            exaggeration, top_p, top_k, repetition_penalty
+            text, language, voice, temperature, cfg_weight, exaggeration, top_p, top_k, repetition_penalty
         )
+        wav_cpu = wav.detach().cpu()
+        sr = int(self.model.sr)
+
+        # NOTE about speed:
+        # Resampling changes BOTH speed and pitch.
+        # True time-stretching requires a vocoder/WSOLA/etc. (not included here).
+        if speed != 1.0:
+            try:
+                wav_cpu = ta.functional.resample(
+                    wav_cpu,
+                    orig_freq=sr,
+                    new_freq=int(sr * float(speed)),
+                )
+            except Exception:
+                pass
 
         buf = BytesIO()
-        wav_cpu = wav.detach().cpu()
-
-        if speed != 1.0:
-            wav_cpu = ta.functional.resample(
-                wav_cpu,
-                orig_freq=int(self.model.sr),
-                new_freq=int(self.model.sr * speed),
-            )
-
-        ta.save(buf, wav_cpu, self.model.sr, format="wav")
+        ta.save(buf, wav_cpu, sr, format="wav")
         buf.seek(0)
 
         chunk_bytes = buf.read()
         elapsed = time.time() - chunk_start
         logger.debug(
             "Chunk %d/%d [%s] generated in %.3f seconds (%d bytes)",
-            chunk_index + 1,
-            total_chunks,
-            language,
-            elapsed,
-            len(chunk_bytes),
+            chunk_index + 1, total_chunks, language, elapsed, len(chunk_bytes)
         )
-
         return chunk_bytes
 
-    async def synthesize_streaming(
+    def _generate_and_encode_chunk_pcm(
         self,
-        req: SpeechRequest,
-    ) -> AsyncIterator[bytes]:
+        chunk_index: int,
+        total_chunks: int,
+        text: str,
+        language: str,
+        voice: VoiceType,
+        temperature: float,
+        cfg_weight: float,
+        exaggeration: float,
+        speed: float,
+        top_p: float,
+        top_k: int,
+        repetition_penalty: float,
+    ) -> bytes:
+        """
+        Encode as raw PCM16LE for streaming.
+        This is the standard production fix for “noise/whisper at the end” that is
+        actually caused by concatenating WAV headers/chunks.
+        """
+        chunk_start = time.time()
+
+        wav = self._generate_chunk(
+            text, language, voice, temperature, cfg_weight, exaggeration, top_p, top_k, repetition_penalty
+        )
+        wav_cpu = wav.detach().cpu()
+        sr = int(self.model.sr)
+
+        if speed != 1.0:
+            try:
+                wav_cpu = ta.functional.resample(
+                    wav_cpu,
+                    orig_freq=sr,
+                    new_freq=int(sr * float(speed)),
+                )
+            except Exception:
+                pass
+
+        pcm = self._to_pcm16le_bytes(wav_cpu)
+
+        elapsed = time.time() - chunk_start
+        logger.debug(
+            "Chunk %d/%d [%s] generated in %.3f seconds (%d PCM bytes)",
+            chunk_index + 1, total_chunks, language, elapsed, len(pcm)
+        )
+        return pcm
+
+    async def synthesize_streaming(self, req: SpeechRequest) -> AsyncIterator[bytes]:
+        # NOTE: active_requests is used for health/readiness only (best effort).
         self._active_requests += 1
         try:
+            # chunking
             if req.chunk_by_sentences:
                 total_words = self._approx_word_count(req.input)
 
@@ -489,16 +633,14 @@ class ChatterboxServiceMultilingual:
                     should_chunk = total_words > base_target
                 else:
                     base_target = CHUNK_SIZE
-                    effective_target = max(base_target, 20) 
+                    effective_target = max(base_target, 20)
                     should_chunk = total_words > 40
 
                 if should_chunk:
-                    word_target = effective_target
-                    max_sentences = req.max_chunk_sentences
                     chunks = self._chunk_text(
                         req.input,
-                        word_target=word_target,
-                        max_sentences=max_sentences,
+                        word_target=effective_target,
+                        max_sentences=req.max_chunk_sentences,
                     )
                 else:
                     chunks = [req.input]
@@ -506,20 +648,17 @@ class ChatterboxServiceMultilingual:
                 chunks = [req.input]
 
             num_chunks = len(chunks)
-
-            logger.info(
-                "Stream: %d chunks | %s | %s",
-                num_chunks,
-                req.language,
-                req.voice,
-            )
+            logger.info("Stream: %d chunks | %s | %s", num_chunks, req.language, req.voice)
 
             loop = asyncio.get_event_loop()
+
+            # Choose encoding strategy
+            encoder = self._generate_and_encode_chunk_pcm if PCM_STREAM else self._generate_and_encode_chunk_wav
 
             for idx, chunk_text in enumerate(chunks):
                 chunk_bytes = await loop.run_in_executor(
                     self._executor,
-                    self._generate_and_encode_chunk,
+                    encoder,
                     idx,
                     num_chunks,
                     chunk_text,
@@ -542,19 +681,16 @@ class ChatterboxServiceMultilingual:
             self._active_requests -= 1
 
     async def synthesize(self, req: SpeechRequest) -> bytes:
+        """
+        Non-streaming synthesis returns a single well-formed WAV file.
+        """
         self._active_requests += 1
         try:
-            logger.info(
-                "Batch: len=%d | %s | %s",
-                len(req.input),
-                req.language,
-                req.voice,
-            )
-
+            logger.info("Batch: len=%d | %s | %s", len(req.input), req.language, req.voice)
             loop = asyncio.get_event_loop()
             wav_bytes = await loop.run_in_executor(
                 self._executor,
-                self._generate_and_encode_chunk,
+                self._generate_and_encode_chunk_wav,
                 0,
                 1,
                 req.input,
@@ -568,9 +704,7 @@ class ChatterboxServiceMultilingual:
                 req.top_k,
                 req.repetition_penalty,
             )
-
             return wav_bytes
-
         except Exception as exc:
             logger.exception("TTS error")
             raise HTTPException(status_code=500, detail=f"TTS failed: {exc}") from exc
@@ -581,33 +715,28 @@ class ChatterboxServiceMultilingual:
 # -----------------------------------------------------------------------------
 # FastAPI Application with Lifespan
 # -----------------------------------------------------------------------------
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    New Lifespan Context Manager.
-    Replaces startup/shutdown events to fix asyncio.CancelledError on reloads.
+    Lifespan Context Manager: loads model once; shuts down cleanly.
     """
     logger.info("🚀 Starting up multilingual TTS server...")
     service: ChatterboxServiceMultilingual = app.state.tts_service
-    
-    # Initialize the heavy model in a separate thread
+
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, service.initialize)
     logger.info("✓ Server ready for requests in %d languages", len(SUPPORTED_LANGUAGES))
-    
+
     yield
-    
-    # Shutdown logic
+
     logger.info("🛶 FastAPI shutdown received, cleaning up TTS service...")
     await loop.run_in_executor(None, service.shutdown)
 
 
 def create_app(device: str) -> FastAPI:
-    """Create multilingual FastAPI application."""
     app = FastAPI(
         title="VRSecretary Chatterbox TTS - Multilingual",
-        version="2.1.2",
+        version="2.2.0",
         description="High-performance streaming TTS supporting 23 languages",
         lifespan=lifespan,
     )
@@ -620,16 +749,13 @@ def create_app(device: str) -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Initialize service instance (but model loads in lifespan)
     service = ChatterboxServiceMultilingual(device=device)
     app.state.tts_service = service
 
     @app.get("/health", response_model=HealthResponse)
     async def health():
-        """Health check with language support info."""
         svc: ChatterboxServiceMultilingual = app.state.tts_service
         vm = svc.voice_manager if svc._initialized else None
-
         return HealthResponse(
             status="ready" if svc._initialized else "initializing",
             device=svc.device,
@@ -644,21 +770,41 @@ def create_app(device: str) -> FastAPI:
 
     @app.get("/languages", response_model=LanguagesResponse)
     async def get_languages():
-        """Get list of all supported languages."""
-        return LanguagesResponse(
-            languages=SUPPORTED_LANGUAGES,
-            count=len(SUPPORTED_LANGUAGES),
-        )
+        return LanguagesResponse(languages=SUPPORTED_LANGUAGES, count=len(SUPPORTED_LANGUAGES))
 
     @app.post("/v1/audio/speech/stream")
     async def v1_audio_speech_stream(request: SpeechRequest):
-        """Streaming TTS endpoint with multilingual support."""
+        """
+        Streaming endpoint.
+
+        PRODUCTION NOTE (THE FIX):
+        - If you stream WAV-bytes per chunk, clients often concatenate WAV headers -> artifacts,
+          including “whisper/noise at the end”.
+        - Standard fix is streaming raw PCM (PCM_STREAM=true) and letting the client wrap it.
+        """
         svc: ChatterboxServiceMultilingual = app.state.tts_service
+        sr = int(svc.model.sr)
 
         async def audio_generator():
             async for chunk in svc.synthesize_streaming(request):
                 yield chunk
 
+        if PCM_STREAM:
+            # audio/L16 is raw 16-bit PCM. Many clients can play if they know sr/channels.
+            return StreamingResponse(
+                audio_generator(),
+                media_type="audio/L16",
+                headers={
+                    "X-Voice-Type": request.voice,
+                    "X-Language": request.language,
+                    "X-Streaming": "true",
+                    "X-Audio-Format": "pcm_s16le",
+                    "X-Sample-Rate": str(sr),
+                    "X-Channels": "1",
+                },
+            )
+
+        # fallback (not recommended for streaming playback/concat)
         return StreamingResponse(
             audio_generator(),
             media_type="audio/wav",
@@ -666,14 +812,13 @@ def create_app(device: str) -> FastAPI:
                 "X-Voice-Type": request.voice,
                 "X-Language": request.language,
                 "X-Streaming": "true",
+                "X-Audio-Format": "wav_chunks",
             },
         )
 
     @app.post("/v1/audio/speech")
     async def v1_audio_speech(request: SpeechRequest):
-        """Standard TTS endpoint with multilingual support."""
         svc: ChatterboxServiceMultilingual = app.state.tts_service
-
         if request.stream:
             return await v1_audio_speech_stream(request)
 
@@ -713,8 +858,6 @@ app = create_app(_device_for_app)
 # -----------------------------------------------------------------------------
 # CLI
 # -----------------------------------------------------------------------------
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Multilingual Chatterbox TTS Server (23 languages)",
@@ -739,9 +882,9 @@ def main() -> None:
     device = detect_device(args.device)
     logger.info("🎤 Starting multilingual TTS server on %s:%d", args.host, args.port)
     logger.info("💬 Device: %s | Languages: %d", device, len(SUPPORTED_LANGUAGES))
+    logger.info("🎚️ Stream mode: %s", "PCM (recommended)" if PCM_STREAM else "WAV-chunks (not recommended)")
 
     global app
-    # Only recreate if device changed from global default, otherwise use existing
     if device != _device_for_app:
         app = create_app(device)
 
@@ -760,7 +903,7 @@ def main() -> None:
     except (KeyboardInterrupt, SystemExit):
         logger.info("Server stopped by user.")
     except Exception as e:
-        logger.error(f"Server crashed: {e}")
+        logger.error("Server crashed: %s", e)
 
 
 if __name__ == "__main__":
