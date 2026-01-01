@@ -1,12 +1,13 @@
 """
-api.py  –  FastAPI front‑door for the Avatar Renderer Pod
+api.py – FastAPI front-door for the Avatar Renderer Pod
 ==========================================================
 * POST /render          → returns {jobId, statusUrl, async} (expects server-side file paths)
 * POST /render-upload   → upload avatar + audio, returns {jobId, statusUrl, async} (browser-friendly)
 * GET  /status/{id}     → returns either {"state": "..."} or the MP4 file
 * GET  /avatars         → list available models and system capabilities
-* GET  /health/live     → liveness probe  (200 OK)
+* GET  /health/live     → liveness probe (200 OK)
 * GET  /health/ready    → readiness probe (checks Celery broker if present)
+* POST /text-to-audio   → synthesize text to speech via Chatterbox
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from .settings import Settings  # pydantic‑based env loader
+from .settings import Settings  # pydantic-based env loader
 
 settings = Settings()
 
@@ -58,9 +59,9 @@ from .pipeline import render_pipeline  # noqa: E402
 
 # ───────────────────────── FastAPI setup ────────────────────────────────── #
 app = FastAPI(
-    title="avatar‑renderer‑svc",
+    title="avatar-renderer-svc",
     version="0.1.0",
-    description="Generate a lip‑synced avatar video (REST façade)",
+    description="Generate a lip-synced avatar video (REST façade)",
 )
 
 # ───────────────────────────── CORS setup ────────────────────────────────── #
@@ -79,6 +80,7 @@ app.add_middleware(
 
 WORK_ROOT = Path("/tmp/avatar-jobs")
 WORK_ROOT.mkdir(parents=True, exist_ok=True)
+
 
 # ─────────────────────────── Pydantic models ────────────────────────────── #
 class RenderBody(BaseModel):
