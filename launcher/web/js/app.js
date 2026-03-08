@@ -22,8 +22,15 @@ async function initApp() {
 
         updateSamples();
         checkHealth();
-        
+        updateEnhancementStatus();
+        updateEnhancementCount();
+
         document.getElementById('language').addEventListener('change', updateSamples);
+
+        // Update count when checkboxes change
+        document.querySelectorAll('[name="enh"]').forEach(cb => {
+            cb.addEventListener('change', updateEnhancementCount);
+        });
         
     } catch (e) {
         console.error("Init failed:", e);
@@ -139,8 +146,14 @@ async function generateVideo() {
     
     const avatar = document.getElementById('avatar-path').value;
     const quality = document.getElementById('quality').value;
+    const text = document.getElementById('text-input').value;
 
-    const res = await eel.generate_video(avatar, quality)();
+    // Collect selected enhancements from checkboxes
+    const enhancements = Array.from(
+        document.querySelectorAll('[name="enh"]:checked')
+    ).map(el => el.value);
+
+    const res = await eel.generate_video(avatar, quality, enhancements, text)();
 
     btn.disabled = false;
     btn.innerHTML = '🎬 Generate Video';
@@ -187,8 +200,44 @@ eel.expose(update_status);
 function update_status(msg) {
     document.getElementById('progress-text').textContent = msg;
     const fill = document.getElementById('progress-fill');
-    if(msg.includes("Initializing")) fill.style.width = '30%';
-    if(msg.includes("Rendering")) fill.style.width = '60%'; 
+    if(msg.includes("Initializing")) fill.style.width = '20%';
+    if(msg.includes("emotion") || msg.includes("Emotion")) fill.style.width = '30%';
+    if(msg.includes("motion") || msg.includes("FOMM")) fill.style.width = '40%';
+    if(msg.includes("Lip") || msg.includes("lip")) fill.style.width = '55%';
+    if(msg.includes("Rendering") || msg.includes("Enhancement")) fill.style.width = '70%';
+    if(msg.includes("Encoding") || msg.includes("Finalizing")) fill.style.width = '85%';
+}
+
+function updateEnhancementCount() {
+    const count = document.querySelectorAll('[name="enh"]:checked').length;
+    const el = document.getElementById('enh-count');
+    if (el) el.textContent = `${count} selected`;
+}
+
+async function updateEnhancementStatus() {
+    try {
+        const info = await eel.get_enhancement_info()();
+        const statusEl = document.getElementById('enh-status');
+        if (info && info.available !== undefined) {
+            statusEl.textContent = `${info.available}/${info.total} ready`;
+            statusEl.className = info.available > 0 ? 'badge online' : 'badge ready';
+        }
+
+        // Disable checkboxes for unavailable enhancements and add tooltips
+        if (info && info.details) {
+            for (const enh of info.details) {
+                const checkbox = document.querySelector(`[name="enh"][value="${enh.name}"]`);
+                if (checkbox) {
+                    const label = checkbox.closest('.enh-toggle');
+                    if (!enh.available && !['emotion_expressions', 'eye_gaze_blink', 'gesture_animation'].includes(enh.name)) {
+                        label.title = `${enh.name} (requires model download)`;
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        console.warn("Enhancement status check failed:", e);
+    }
 }
 
 window.addEventListener('DOMContentLoaded', initApp);

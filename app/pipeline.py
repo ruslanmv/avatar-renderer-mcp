@@ -618,18 +618,24 @@ def render_pipeline(
     viseme_json: Optional[str] = None,
     quality_mode: str = "auto",
     force_wav2lip: bool = False,
+    enhancements: Optional[List[str]] = None,
+    transcript: Optional[str] = None,
 ) -> str:
     """
-    FOMM -> (Diff2Lip or Wav2Lip) -> optional GFPGAN -> final mp4 with guaranteed audio
+    FOMM -> (Diff2Lip or Wav2Lip) -> optional GFPGAN -> optional enhancements -> final mp4
 
     Args:
         face_image: Path to portrait image
         audio: Path to audio file
         out_path: Output video path
         reference_video: Optional reference video for motion
-        viseme_json: Optional viseme data (currently unused)
-        quality_mode: Quality mode (auto, real_time, high_quality)
+        viseme_json: Optional viseme data
+        quality_mode: Quality mode (auto, real_time, high_quality, cinematic, 3d)
         force_wav2lip: If True, use Wav2Lip instead of Diff2Lip regardless of quality_mode
+        enhancements: Optional list of enhancement names to apply (e.g., ["emotion_expressions",
+                      "eye_gaze_blink"]). If None, no enhancements run (preserves original behavior).
+                      Use ["all"] to enable all available enhancements.
+        transcript: Optional text transcript of the audio (used by emotion and gesture enhancements)
 
     Audio handling:
     - Diff2Lip uses 16kHz mono internally for lip-sync inference
@@ -642,49 +648,173 @@ def render_pipeline(
     if not Path(audio).exists():
         raise FileNotFoundError(f"Audio file not found: {audio}")
 
-    fomm_frames = run_fomm(face_image, audio, reference_video, tmp)
+    # ─────────────────────────────────────────────────────────────────────────
+    # Enhancement setup (additive — only runs if enhancements are requested)
+    # ─────────────────────────────────────────────────────────────────────────
+    enhancement_ctx = None
+    enabled_enhancements = None
+
+    if enhancements:
+        try:
+            from .enhancements import EnhancementContext, registry as enhancement_registry
+
+            if "all" in enhancements:
+                enabled_enhancements = set(enhancement_registry.list_names())
+            else:
+                enabled_enhancements = set(enhancements)
+
+            enhancement_ctx = EnhancementContext(
+                face_image=face_image,
+                audio_path=audio,
+                reference_video=reference_video,
+                viseme_json=viseme_json,
+                transcript=transcript,
+                quality_mode=quality_mode,
+                tmp_dir=tmp,
+                fps=25,
+                device="cuda" if torch.cuda.is_available() else "cpu",
+            )
+
+            # Run TTS-stage enhancements (e.g., CosyVoice) BEFORE core pipeline
+            enhancement_ctx = enhancement_registry.apply_stage(
+                enhancement_ctx, "tts", enabled_enhancements
+            )
+            if enhancement_ctx.audio_path != audio and Path(enhancement_ctx.audio_path).exists():
+                audio = enhancement_ctx.audio_path
+                print(f"[pipeline] Audio updated by TTS enhancement: {audio}")
+
+            # Run pre_motion enhancements (e.g., emotion detection)
+            enhancement_ctx = enhancement_registry.apply_stage(
+                enhancement_ctx, "pre_motion", enabled_enhancements
+            )
+            if enhancement_ctx.detected_emotion:
+                print(f"[pipeline] Detected emotion: {enhancement_ctx.detected_emotion}")
+
+        except ImportError:
+            print("[pipeline] Enhancement modules not available; running core pipeline only.")
+            enhancement_ctx = None
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Motion driver enhancements (Hallo3, InsTaG, LivePortrait — if requested)
+    # ─────────────────────────────────────────────────────────────────────────
+    motion_driver_handled = False
+    fomm_frames: Path
+
+    if enhancement_ctx and enabled_enhancements:
+        try:
+            from .enhancements import registry as enhancement_registry
+
+            enhancement_ctx = enhancement_registry.apply_stage(
+                enhancement_ctx, "motion_driver", enabled_enhancements
+            )
+            if enhancement_ctx.frames_dir and enhancement_ctx.frames_dir.exists():
+                fomm_frames = enhancement_ctx.frames_dir
+                motion_driver_handled = True
+                print(f"[pipeline] Motion driver enhancement produced frames: {fomm_frames}")
+            elif enhancement_ctx.video_path and enhancement_ctx.video_path.exists():
+                motion_driver_handled = True
+                print(f"[pipeline] Motion driver enhancement produced video: {enhancement_ctx.video_path}")
+        except Exception as e:
+            print(f"[pipeline] Motion driver enhancement failed: {e}. Falling back to FOMM.")
+
+    # Core FOMM (original — only if no motion driver enhancement took over)
+    if not motion_driver_handled:
+        fomm_frames = run_fomm(face_image, audio, reference_video, tmp)
 
     # ✅ ALWAYS use original high-quality audio for final output
     final_audio = audio
 
     lip_result: Path
 
-    # Decide which lip-sync method to use
-    if force_wav2lip:
+    # If motion driver produced a complete video, skip lip-sync
+    if motion_driver_handled and enhancement_ctx and enhancement_ctx.video_path:
+        lip_result = enhancement_ctx.video_path
+    elif force_wav2lip:
         print("[pipeline] Wav2Lip forced via --wav2lip flag")
         lip_result = run_wav2lip(fomm_frames, audio, tmp)
     else:
-        want_d2l = (quality_mode in ("high_quality", "auto")) and torch.cuda.is_available()
-        d2l_available = _diff2lip_script().exists() and (D2L_PAPER_CKPT.exists() or D2L_LEGACY_CKPT.exists())
-
-        if want_d2l and d2l_available:
+        # ─── Check if lip-sync enhancements want to handle this ───
+        lip_sync_handled = False
+        if enhancement_ctx and enabled_enhancements:
             try:
-                # Diff2Lip uses 16kHz mono internally, but we don't use that for final output
-                lip_result = run_diff2lip(fomm_frames, audio, tmp)
-                # ✅ DON'T overwrite final_audio - keep using original
-                print(f"[pipeline] Using original audio for final output (not 16kHz version)")
+                from .enhancements import registry as enhancement_registry
+
+                enhancement_ctx.frames_dir = fomm_frames
+                enhancement_ctx = enhancement_registry.apply_stage(
+                    enhancement_ctx, "lip_sync", enabled_enhancements
+                )
+                if enhancement_ctx.video_path and enhancement_ctx.video_path.exists():
+                    lip_result = enhancement_ctx.video_path
+                    lip_sync_handled = True
+                    print(f"[pipeline] Lip-sync enhancement produced: {lip_result}")
+                elif (enhancement_ctx.frames_dir and
+                      enhancement_ctx.frames_dir.exists() and
+                      enhancement_ctx.frames_dir != fomm_frames):
+                    lip_result = enhancement_ctx.frames_dir
+                    lip_sync_handled = True
             except Exception as e:
-                print(f"[pipeline] Diff2Lip failed: {e}. Falling back to Wav2Lip.")
+                print(f"[pipeline] Lip-sync enhancement failed: {e}. Using core lip-sync.")
+
+        # Original lip-sync logic (unchanged fallback)
+        if not lip_sync_handled:
+            want_d2l = (quality_mode in ("high_quality", "auto")) and torch.cuda.is_available()
+            d2l_available = _diff2lip_script().exists() and (D2L_PAPER_CKPT.exists() or D2L_LEGACY_CKPT.exists())
+
+            if want_d2l and d2l_available:
+                try:
+                    lip_result = run_diff2lip(fomm_frames, audio, tmp)
+                    print(f"[pipeline] Using original audio for final output (not 16kHz version)")
+                except Exception as e:
+                    print(f"[pipeline] Diff2Lip failed: {e}. Falling back to Wav2Lip.")
+                    lip_result = run_wav2lip(fomm_frames, audio, tmp)
+            else:
                 lip_result = run_wav2lip(fomm_frames, audio, tmp)
-        else:
-            lip_result = run_wav2lip(fomm_frames, audio, tmp)
 
     final_result: Path = lip_result
     if GFPGAN_CKPT.exists():
         final_result = enhance_with_gfpgan(lip_result, tmp)
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # Post-processing enhancements (eye gaze, viseme, gestures — additive)
+    # ─────────────────────────────────────────────────────────────────────────
+    if enhancement_ctx and enabled_enhancements:
+        try:
+            from .enhancements import registry as enhancement_registry
+
+            if final_result.is_dir():
+                enhancement_ctx.frames_dir = final_result
+                enhancement_ctx.video_path = None
+            else:
+                enhancement_ctx.video_path = final_result
+                enhancement_ctx.frames_dir = None
+
+            enhancement_ctx = enhancement_registry.apply_stage(
+                enhancement_ctx, "post_process", enabled_enhancements
+            )
+
+            if enhancement_ctx.frames_dir and enhancement_ctx.frames_dir.exists():
+                final_result = enhancement_ctx.frames_dir
+            elif enhancement_ctx.video_path and enhancement_ctx.video_path.exists():
+                final_result = enhancement_ctx.video_path
+
+            if enhancement_ctx.applied_enhancements:
+                print(f"[pipeline] Applied enhancements: {', '.join(enhancement_ctx.applied_enhancements)}")
+        except Exception as e:
+            print(f"[pipeline] Post-processing enhancements failed: {e}. Using core result.")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Final encode (unchanged)
+    # ─────────────────────────────────────────────────────────────────────────
     out_path_abs = str(Path(out_path).resolve())
     out_path_p = Path(out_path_abs)
     out_path_p.parent.mkdir(parents=True, exist_ok=True)
 
     if final_result.is_file() and final_result.suffix.lower() == ".mp4":
-        # Video file - remux with original high-quality audio
         tmp_remux = tmp / "remux.mp4"
         print(f"[pipeline] Remuxing video with original audio: {final_audio}")
         _remux_video_with_audio(final_result, Path(final_audio), tmp_remux)
         shutil.copy(str(tmp_remux), out_path_abs)
     else:
-        # Directory of frames - encode with original high-quality audio
         print(f"[pipeline] Encoding frames with original audio: {final_audio}")
         encode_mp4(final_result, final_audio, str(out_path_abs), fps=25)
 
@@ -692,5 +822,8 @@ def render_pipeline(
         print("[pipeline] ⚠️ WARNING: final output seems to have no audio stream after remux.")
     else:
         print("[pipeline] ✅ Audio stream verified in final output")
+
+    if enhancement_ctx and enhancement_ctx.applied_enhancements:
+        print(f"[pipeline] Enhancement summary: {enhancement_ctx.enhancement_logs}")
 
     return out_path_abs

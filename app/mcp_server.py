@@ -110,6 +110,8 @@ def _worker_loop() -> None:
                 viseme_json=job.get("viseme_json"),
                 quality_mode=quality_mode,
                 out_path=job["out_path"],
+                enhancements=job.get("enhancements"),
+                transcript=job.get("transcript"),
             )
             _emit_progress(job_id, "finished", {"output": result_path, "qualityMode": quality_mode})
             job["on_done"](
@@ -169,6 +171,8 @@ def _handle_request(req: Dict):
             "driver_video": req["params"].get("driver_video"),
             "viseme_json": req["params"].get("viseme_json"),
             "quality_mode": req["params"].get("quality_mode", "auto"),
+            "enhancements": req["params"].get("enhancements"),
+            "transcript": req["params"].get("transcript"),
             "out_path": out_mp4,
             "on_done": _done,
         }

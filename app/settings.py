@@ -154,6 +154,68 @@ class Settings(BaseSettings):
         return self.MODEL_ROOT / "gfpgan" / "GFPGANv1.3.pth"
 
     # ─────────────────────────────────────────────────────────────────────────
+    # Enhancement Model Paths (additive — all optional)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    @property
+    def MUSETALK_MODEL_DIR(self) -> Path:
+        """Directory for MuseTalk v1.5 lip-sync model checkpoints."""
+        return self.MODEL_ROOT / "musetalk"
+
+    @property
+    def LIVEPORTRAIT_MODEL_DIR(self) -> Path:
+        """Directory for LivePortrait expression-controllable motion driver."""
+        return self.MODEL_ROOT / "liveportrait"
+
+    @property
+    def LATENTSYNC_MODEL_DIR(self) -> Path:
+        """Directory for LatentSync latent-space lip-sync checkpoints."""
+        return self.MODEL_ROOT / "latentsync"
+
+    @property
+    def HALLO3_MODEL_DIR(self) -> Path:
+        """Directory for Hallo3 cinematic quality Diffusion Transformer."""
+        return self.MODEL_ROOT / "hallo3"
+
+    @property
+    def AUDIO2EMOTION_MODEL_DIR(self) -> Path:
+        """Directory for NVIDIA Audio2Emotion model."""
+        return self.MODEL_ROOT / "audio2emotion"
+
+    @property
+    def GESTURELSM_MODEL_DIR(self) -> Path:
+        """Directory for GestureLSM co-speech gesture model."""
+        return self.MODEL_ROOT / "gesturelsm"
+
+    @property
+    def INSTAG_MODEL_DIR(self) -> Path:
+        """Directory for InsTaG 3D Gaussian Splatting model."""
+        return self.MODEL_ROOT / "instag"
+
+    @property
+    def GAUSSIAN_CACHE_DIR(self) -> Path:
+        """Cache directory for pre-built 3D Gaussian avatar models."""
+        return self.MODEL_ROOT / "gaussian_cache"
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Enhancement Configuration
+    # ─────────────────────────────────────────────────────────────────────────
+
+    COSYVOICE_URL: str = Field(
+        default="http://localhost:5001",
+        description="URL of the CosyVoice TTS server for emotional prosody synthesis",
+    )
+
+    DEFAULT_ENHANCEMENTS: Optional[str] = Field(
+        default=None,
+        description=(
+            "Comma-separated list of enhancements to enable by default "
+            "(e.g., 'emotion_expressions,eye_gaze_blink'). "
+            "If not set, no enhancements run unless explicitly requested."
+        ),
+    )
+
+    # ─────────────────────────────────────────────────────────────────────────
     # FFmpeg Configuration
     # ─────────────────────────────────────────────────────────────────────────
 
