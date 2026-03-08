@@ -135,3 +135,45 @@ select:focus, input:focus, textarea:focus { outline: 2px solid var(--primary); b
 .hidden { display: none !important; }
 
 @keyframes pulse { 0% { opacity: 0.6; } 50% { opacity: 1; } 100% { opacity: 0.6; } }
+
+/* Enhancement Toggles */
+.enhancements-section { margin-top: 20px; }
+.enhancements-section > label { display: block; color: var(--text-dim); margin-bottom: 10px; font-size: 0.9rem; }
+
+.enhancement-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.enh-toggle {
+    cursor: pointer;
+    display: inline-block;
+}
+
+.enh-toggle input[type="checkbox"] {
+    display: none;
+}
+
+.enh-chip {
+    display: inline-block;
+    padding: 5px 12px;
+    border-radius: 16px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--enh-color, #94a3b8);
+    background: transparent;
+    border: 1px solid var(--enh-color, #333);
+    opacity: 0.5;
+    transition: all 0.2s;
+}
+
+.enh-toggle input:checked + .enh-chip {
+    opacity: 1;
+    background: color-mix(in srgb, var(--enh-color) 15%, transparent);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--enh-color) 25%, transparent);
+}
+
+.enh-toggle:hover .enh-chip {
+    opacity: 0.8;
+}

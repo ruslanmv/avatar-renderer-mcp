@@ -72,6 +72,11 @@ export default function Page() {
   );
   const [selectedAvatar, setSelectedAvatar] = useState('professional');
   const [qualityMode, setQualityMode] = useState('auto');
+  const [enabledEnhancements, setEnabledEnhancements] = useState<string[]>([
+    'emotion_expressions',
+    'eye_gaze_blink',
+    'gesture_animation',
+  ]);
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -113,6 +118,12 @@ export default function Page() {
     fd.append('avatar', avatarFile);
     fd.append('audio', audioFile);
     fd.append('qualityMode', qualityMode);
+    if (enabledEnhancements.length > 0) {
+      fd.append('enhancements', enabledEnhancements.join(','));
+    }
+    if (script.trim()) {
+      fd.append('transcript', script.trim());
+    }
 
     try {
       const res = await fetch(`${API_BASE}/render-upload`, {
@@ -439,6 +450,49 @@ export default function Page() {
                   <option value="real_time">Real-time</option>
                   <option value="high_quality">High quality</option>
                 </select>
+              </div>
+
+              {/* Enhancement Toggles */}
+              <div className="mb-6">
+                <label className="block text-sm text-gray-400 mb-3">Enhancements</label>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { id: 'emotion_expressions', label: 'Emotion', color: 'cyan', ready: true },
+                    { id: 'eye_gaze_blink', label: 'Eye Gaze', color: 'purple', ready: true },
+                    { id: 'gesture_animation', label: 'Gestures', color: 'green', ready: true },
+                    { id: 'musetalk_lipsync', label: 'MuseTalk', color: 'blue', ready: false },
+                    { id: 'liveportrait_driver', label: 'LivePortrait', color: 'emerald', ready: false },
+                    { id: 'latentsync_lipsync', label: 'LatentSync', color: 'amber', ready: false },
+                    { id: 'hallo3_cinematic', label: 'Hallo3', color: 'red', ready: false },
+                    { id: 'cosyvoice_tts', label: 'CosyVoice', color: 'sky', ready: false },
+                    { id: 'viseme_guided', label: 'Viseme', color: 'pink', ready: false },
+                    { id: 'gaussian_splatting', label: '3D Gauss', color: 'orange', ready: false },
+                  ].map((enh) => {
+                    const isActive = enabledEnhancements.includes(enh.id);
+                    return (
+                      <button
+                        key={enh.id}
+                        type="button"
+                        onClick={() => {
+                          setEnabledEnhancements((prev) =>
+                            prev.includes(enh.id) ? prev.filter((e) => e !== enh.id) : [...prev, enh.id]
+                          );
+                        }}
+                        className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                          isActive
+                            ? `border-${enh.color}-500 bg-${enh.color}-500/20 text-${enh.color}-300 shadow-[0_0_8px_rgba(0,150,255,0.2)]`
+                            : 'border-gray-600 text-gray-500 opacity-50 hover:opacity-75'
+                        }`}
+                        title={enh.ready ? enh.label : `${enh.label} (requires model download)`}
+                      >
+                        {enh.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  {enabledEnhancements.length} enhancement{enabledEnhancements.length !== 1 ? 's' : ''} selected
+                </p>
               </div>
 
               <div className="flex flex-wrap gap-4 justify-center">

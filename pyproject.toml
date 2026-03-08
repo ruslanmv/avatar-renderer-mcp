@@ -161,8 +161,16 @@ launcher = [
     "python-dotenv>=1.0.0,<2.0.0",
 ]
 
+enhancements = [
+    # Enhancement #1: Emotion detection (text fallback)
+    # transformers already in core deps
+    # Enhancement #3: Eye gaze (uses opencv, already in core deps)
+    # Enhancement #5: LatentSync (optional ONNX runtime for some models)
+    "onnxruntime>=1.16.0",
+]
+
 all = [
-    "avatar-renderer-mcp[dev,launcher]",
+    "avatar-renderer-mcp[dev,launcher,enhancements]",
 ]
 
 [project.urls]
@@ -184,7 +192,7 @@ build-backend = "setuptools.build_meta"
 # =============================================================================
 
 [tool.setuptools]
-packages = ["app"]
+packages = ["app", "app.enhancements"]
 include-package-data = true
 
 [tool.setuptools.package-data]
@@ -354,6 +362,8 @@ module = [
     "kornia.*",
     "mediapipe.*",
     "yacs.*",
+    "onnxruntime.*",
+    "tgt.*",
 ]
 ignore_missing_imports = true
 

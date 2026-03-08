@@ -1,0 +1,138 @@
+<svg width="800" height="280" viewBox="0 0 800 280" xmlns="http://www.w3.org/2000/svg" font-family="Inter, Arial, sans-serif">
+  <defs>
+    <linearGradient id="hdr" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#667eea"/>
+      <stop offset="100%" style="stop-color:#764ba2"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#1e293b"/>
+      <stop offset="100%" style="stop-color:#0f172a"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="280" rx="12" fill="#0f172a"/>
+
+  <!-- Header bar -->
+  <rect width="800" height="50" rx="12" fill="url(#hdr)"/>
+  <rect y="38" width="800" height="12" fill="url(#hdr)"/>
+  <text x="400" y="32" text-anchor="middle" font-size="16" font-weight="700" fill="#fff">10 Enhancement Modules — Plug-and-Play Avatar Realism</text>
+
+  <!-- Cards row 1 -->
+  <g transform="translate(15, 60)">
+    <rect width="148" height="85" rx="6" fill="url(#card)" stroke="#6366f1" stroke-width="1.5"/>
+    <circle cx="18" cy="20" r="8" fill="#6366f1" opacity="0.3"/>
+    <text x="18" y="24" text-anchor="middle" font-size="10" fill="#6366f1">1</text>
+    <text x="35" y="24" font-size="9" font-weight="600" fill="#e2e8f0">Emotion</text>
+    <text x="12" y="42" font-size="7.5" fill="#94a3b8">Audio prosody analysis</text>
+    <text x="12" y="55" font-size="7.5" fill="#94a3b8">7 emotion classes</text>
+    <rect x="12" y="65" width="40" height="13" rx="3" fill="#22c55e" opacity="0.2"/>
+    <text x="32" y="75" text-anchor="middle" font-size="7" font-weight="600" fill="#22c55e">Ready</text>
+  </g>
+
+  <g transform="translate(173, 60)">
+    <rect width="148" height="85" rx="6" fill="url(#card)" stroke="#3b82f6" stroke-width="1.5"/>
+    <circle cx="18" cy="20" r="8" fill="#3b82f6" opacity="0.3"/>
+    <text x="18" y="24" text-anchor="middle" font-size="10" fill="#3b82f6">2</text>
+    <text x="35" y="24" font-size="9" font-weight="600" fill="#e2e8f0">MuseTalk</text>
+    <text x="12" y="42" font-size="7.5" fill="#94a3b8">30+ FPS lip-sync</text>
+    <text x="12" y="55" font-size="7.5" fill="#94a3b8">Replaces Wav2Lip</text>
+    <rect x="12" y="65" width="55" height="13" rx="3" fill="#f59e0b" opacity="0.2"/>
+    <text x="39" y="75" text-anchor="middle" font-size="7" font-weight="600" fill="#f59e0b">Model Req</text>
+  </g>
+
+  <g transform="translate(331, 60)">
+    <rect width="148" height="85" rx="6" fill="url(#card)" stroke="#8b5cf6" stroke-width="1.5"/>
+    <circle cx="18" cy="20" r="8" fill="#8b5cf6" opacity="0.3"/>
+    <text x="18" y="24" text-anchor="middle" font-size="10" fill="#8b5cf6">3</text>
+    <text x="35" y="24" font-size="9" font-weight="600" fill="#e2e8f0">Eye Gaze</text>
+    <text x="12" y="42" font-size="7.5" fill="#94a3b8">Blink + saccades</text>
+    <text x="12" y="55" font-size="7.5" fill="#94a3b8">15-20 blinks/min</text>
+    <rect x="12" y="65" width="40" height="13" rx="3" fill="#22c55e" opacity="0.2"/>
+    <text x="32" y="75" text-anchor="middle" font-size="7" font-weight="600" fill="#22c55e">Ready</text>
+  </g>
+
+  <g transform="translate(489, 60)">
+    <rect width="148" height="85" rx="6" fill="url(#card)" stroke="#10b981" stroke-width="1.5"/>
+    <circle cx="18" cy="20" r="8" fill="#10b981" opacity="0.3"/>
+    <text x="18" y="24" text-anchor="middle" font-size="10" fill="#10b981">4</text>
+    <text x="35" y="24" font-size="9" font-weight="600" fill="#e2e8f0">LivePortrait</text>
+    <text x="12" y="42" font-size="7.5" fill="#94a3b8">Expression control</text>
+    <text x="12" y="55" font-size="7.5" fill="#94a3b8">Identity-preserving</text>
+    <rect x="12" y="65" width="55" height="13" rx="3" fill="#f59e0b" opacity="0.2"/>
+    <text x="39" y="75" text-anchor="middle" font-size="7" font-weight="600" fill="#f59e0b">Model Req</text>
+  </g>
+
+  <g transform="translate(647, 60)">
+    <rect width="148" height="85" rx="6" fill="url(#card)" stroke="#f59e0b" stroke-width="1.5"/>
+    <circle cx="18" cy="20" r="8" fill="#f59e0b" opacity="0.3"/>
+    <text x="18" y="24" text-anchor="middle" font-size="10" fill="#f59e0b">5</text>
+    <text x="35" y="24" font-size="9" font-weight="600" fill="#e2e8f0">LatentSync</text>
+    <text x="12" y="42" font-size="7.5" fill="#94a3b8">Latent-space lip-sync</text>
+    <text x="12" y="55" font-size="7.5" fill="#94a3b8">ByteDance research</text>
+    <rect x="12" y="65" width="55" height="13" rx="3" fill="#f59e0b" opacity="0.2"/>
+    <text x="39" y="75" text-anchor="middle" font-size="7" font-weight="600" fill="#f59e0b">Model Req</text>
+  </g>
+
+  <!-- Cards row 2 -->
+  <g transform="translate(15, 158)">
+    <rect width="148" height="85" rx="6" fill="url(#card)" stroke="#ef4444" stroke-width="1.5"/>
+    <circle cx="18" cy="20" r="8" fill="#ef4444" opacity="0.3"/>
+    <text x="18" y="24" text-anchor="middle" font-size="10" fill="#ef4444">6</text>
+    <text x="35" y="24" font-size="9" font-weight="600" fill="#e2e8f0">Hallo3</text>
+    <text x="12" y="42" font-size="7.5" fill="#94a3b8">DiT cinematic mode</text>
+    <text x="12" y="55" font-size="7.5" fill="#94a3b8">CVPR 2025, MIT</text>
+    <rect x="12" y="65" width="55" height="13" rx="3" fill="#f59e0b" opacity="0.2"/>
+    <text x="39" y="75" text-anchor="middle" font-size="7" font-weight="600" fill="#f59e0b">Model Req</text>
+  </g>
+
+  <g transform="translate(173, 158)">
+    <rect width="148" height="85" rx="6" fill="url(#card)" stroke="#06b6d4" stroke-width="1.5"/>
+    <circle cx="18" cy="20" r="8" fill="#06b6d4" opacity="0.3"/>
+    <text x="18" y="24" text-anchor="middle" font-size="10" fill="#06b6d4">7</text>
+    <text x="35" y="24" font-size="9" font-weight="600" fill="#e2e8f0">CosyVoice</text>
+    <text x="12" y="42" font-size="7.5" fill="#94a3b8">Emotional prosody TTS</text>
+    <text x="12" y="55" font-size="7.5" fill="#94a3b8">Alibaba, Apache-2.0</text>
+    <rect x="12" y="65" width="55" height="13" rx="3" fill="#f59e0b" opacity="0.2"/>
+    <text x="39" y="75" text-anchor="middle" font-size="7" font-weight="600" fill="#f59e0b">Model Req</text>
+  </g>
+
+  <g transform="translate(331, 158)">
+    <rect width="148" height="85" rx="6" fill="url(#card)" stroke="#ec4899" stroke-width="1.5"/>
+    <circle cx="18" cy="20" r="8" fill="#ec4899" opacity="0.3"/>
+    <text x="18" y="24" text-anchor="middle" font-size="10" fill="#ec4899">8</text>
+    <text x="35" y="24" font-size="9" font-weight="600" fill="#e2e8f0">Viseme Guided</text>
+    <text x="12" y="42" font-size="7.5" fill="#94a3b8">Phoneme-accurate</text>
+    <text x="12" y="55" font-size="7.5" fill="#94a3b8">MFA integration</text>
+    <rect x="12" y="65" width="55" height="13" rx="3" fill="#f59e0b" opacity="0.2"/>
+    <text x="39" y="75" text-anchor="middle" font-size="7" font-weight="600" fill="#f59e0b">Data Req</text>
+  </g>
+
+  <g transform="translate(489, 158)">
+    <rect width="148" height="85" rx="6" fill="url(#card)" stroke="#84cc16" stroke-width="1.5"/>
+    <circle cx="18" cy="20" r="8" fill="#84cc16" opacity="0.3"/>
+    <text x="18" y="24" text-anchor="middle" font-size="10" fill="#84cc16">9</text>
+    <text x="35" y="24" font-size="9" font-weight="600" fill="#e2e8f0">Gestures</text>
+    <text x="12" y="42" font-size="7.5" fill="#94a3b8">Co-speech animation</text>
+    <text x="12" y="55" font-size="7.5" fill="#94a3b8">Breathing + sway</text>
+    <rect x="12" y="65" width="40" height="13" rx="3" fill="#22c55e" opacity="0.2"/>
+    <text x="32" y="75" text-anchor="middle" font-size="7" font-weight="600" fill="#22c55e">Ready</text>
+  </g>
+
+  <g transform="translate(647, 158)">
+    <rect width="148" height="85" rx="6" fill="url(#card)" stroke="#f97316" stroke-width="1.5"/>
+    <circle cx="18" cy="20" r="8" fill="#f97316" opacity="0.3"/>
+    <text x="18" y="24" text-anchor="middle" font-size="10" fill="#f97316">10</text>
+    <text x="35" y="24" font-size="9" font-weight="600" fill="#e2e8f0">3D Gaussian</text>
+    <text x="12" y="42" font-size="7.5" fill="#94a3b8">Splatting backend</text>
+    <text x="12" y="55" font-size="7.5" fill="#94a3b8">InsTaG, CVPR 2025</text>
+    <rect x="12" y="65" width="55" height="13" rx="3" fill="#f59e0b" opacity="0.2"/>
+    <text x="39" y="75" text-anchor="middle" font-size="7" font-weight="600" fill="#f59e0b">Model Req</text>
+  </g>
+
+  <!-- Legend -->
+  <rect x="250" y="255" width="8" height="8" rx="2" fill="#22c55e" opacity="0.5"/>
+  <text x="263" y="263" font-size="8" fill="#94a3b8">Works out-of-the-box</text>
+  <rect x="400" y="255" width="8" height="8" rx="2" fill="#f59e0b" opacity="0.5"/>
+  <text x="413" y="263" font-size="8" fill="#94a3b8">Requires model download</text>
+</svg>

@@ -92,9 +92,24 @@ class RenderBody(BaseModel):
         default="auto",
         alias="qualityMode",
         description=(
-            "Rendering quality mode: 'real_time' for fast streaming (SadTalker+Wav2Lip), "
-            "'high_quality' for best results (FOMM+Diff2Lip+GFPGAN), or 'auto' to choose automatically"
+            "Rendering quality mode: 'real_time' (Wav2Lip/MuseTalk), "
+            "'high_quality' (FOMM+Diff2Lip/LatentSync+GFPGAN), "
+            "'cinematic' (Hallo3 DiT), '3d' (Gaussian Splatting), or 'auto'"
         )
+    )
+    enhancements: Optional[list] = Field(
+        default=None,
+        description=(
+            "List of enhancement names to apply. Options: "
+            "'emotion_expressions', 'musetalk_lipsync', 'eye_gaze_blink', "
+            "'liveportrait_driver', 'latentsync_lipsync', 'hallo3_cinematic', "
+            "'cosyvoice_tts', 'viseme_guided', 'gesture_animation', "
+            "'gaussian_splatting'. Use ['all'] for all available."
+        )
+    )
+    transcript: Optional[str] = Field(
+        None,
+        description="Optional text transcript of the audio (enables emotion detection and gesture sync)"
     )
 
 
@@ -128,6 +143,8 @@ if celery_available:
             viseme_json=payload.get("viseme_json"),
             quality_mode=payload.get("quality_mode", "auto"),
             out_path=payload["out_path"],
+            enhancements=payload.get("enhancements"),
+            transcript=payload.get("transcript"),
         )
 
 else:
@@ -139,6 +156,8 @@ else:
             viseme_json=payload.get("viseme_json"),
             quality_mode=payload.get("quality_mode", "auto"),
             out_path=payload["out_path"],
+            enhancements=payload.get("enhancements"),
+            transcript=payload.get("transcript"),
         )
         # mark success for readiness
         (WORK_ROOT / payload["job_id"] / "done").touch()
@@ -153,6 +172,11 @@ def render_job(body: RenderBody, bg: BackgroundTasks):
     job_dir.mkdir(parents=True, exist_ok=True)
     out_mp4 = job_dir / "out.mp4"
 
+    # Resolve enhancements: per-request or default from settings
+    active_enhancements = body.enhancements
+    if active_enhancements is None and settings.DEFAULT_ENHANCEMENTS:
+        active_enhancements = [e.strip() for e in settings.DEFAULT_ENHANCEMENTS.split(",") if e.strip()]
+
     payload = {
         "job_id": job_id,
         "avatar_path": body.avatarPath,
@@ -161,6 +185,8 @@ def render_job(body: RenderBody, bg: BackgroundTasks):
         "viseme_json": body.visemeJson,
         "quality_mode": body.qualityMode,
         "out_path": str(out_mp4),
+        "enhancements": active_enhancements,
+        "transcript": body.transcript,
     }
 
     # save original request
@@ -187,8 +213,14 @@ async def render_upload(
     avatar: UploadFile = File(...),
     audio: UploadFile = File(...),
     qualityMode: str = Form("auto"),
+    enhancements: Optional[str] = Form(None),
+    transcript: Optional[str] = Form(None),
 ):
-    """Upload avatar image + audio, start render job, return jobId + status URL."""
+    """Upload avatar image + audio, start render job, return jobId + status URL.
+
+    enhancements: Comma-separated list of enhancement names (e.g., 'emotion_expressions,eye_gaze_blink')
+    transcript: Optional text transcript of the audio
+    """
     job_id = str(uuid.uuid4())
     job_dir = WORK_ROOT / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -203,12 +235,21 @@ async def render_upload(
     with audio_path.open("wb") as f:
         shutil.copyfileobj(audio.file, f)
 
+    # Parse enhancements from comma-separated form field
+    active_enhancements = None
+    if enhancements:
+        active_enhancements = [e.strip() for e in enhancements.split(",") if e.strip()]
+    elif settings.DEFAULT_ENHANCEMENTS:
+        active_enhancements = [e.strip() for e in settings.DEFAULT_ENHANCEMENTS.split(",") if e.strip()]
+
     payload = {
         "job_id": job_id,
         "avatar_path": str(avatar_path),
         "audio_path": str(audio_path),
         "quality_mode": qualityMode,
         "out_path": str(out_mp4),
+        "enhancements": active_enhancements,
+        "transcript": transcript,
     }
 
     # save upload metadata
@@ -218,6 +259,7 @@ async def render_upload(
                 "avatar_filename": avatar.filename,
                 "audio_filename": audio.filename,
                 "quality_mode": qualityMode,
+                "enhancements": active_enhancements,
             },
             indent=2,
         )
@@ -466,6 +508,14 @@ def list_avatars():
         models_status["wav2lip"]["available"]
     )
 
+    # Enhancements status
+    enhancements_info = []
+    try:
+        from .enhancements import registry as enhancement_registry
+        enhancements_info = enhancement_registry.get_info_all()
+    except ImportError:
+        pass
+
     return JSONResponse({
         "status": "ready",
         "models": models_status,
@@ -486,8 +536,19 @@ def list_avatars():
                 "available": real_time_ready,
                 "description": "SadTalker + Wav2Lip pipeline for faster processing",
                 "models": ["sadtalker", "wav2lip", "gfpgan"]
+            },
+            "cinematic": {
+                "available": any(e["name"] == "hallo3_cinematic" and e["available"] for e in enhancements_info),
+                "description": "Hallo3 Diffusion Transformer for cinematic quality (slow, GPU intensive)",
+                "models": ["hallo3"]
+            },
+            "3d": {
+                "available": any(e["name"] == "gaussian_splatting" and e["available"] for e in enhancements_info),
+                "description": "InsTaG 3D Gaussian Splatting for real-time 3D avatars",
+                "models": ["instag"]
             }
         },
+        "enhancements": enhancements_info,
         "tts": {
             "available": tts_available,
             "server_url": settings.CHATTERBOX_URL if tts_available else None,

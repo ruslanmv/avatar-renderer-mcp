@@ -1,0 +1,139 @@
+<svg width="900" height="520" viewBox="0 0 900 520" xmlns="http://www.w3.org/2000/svg" font-family="Inter, Arial, sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0f172a"/>
+      <stop offset="100%" style="stop-color:#1e293b"/>
+    </linearGradient>
+    <linearGradient id="tts" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1"/>
+      <stop offset="100%" style="stop-color:#4f46e5"/>
+    </linearGradient>
+    <linearGradient id="pre" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#f59e0b"/>
+      <stop offset="100%" style="stop-color:#d97706"/>
+    </linearGradient>
+    <linearGradient id="motion" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#10b981"/>
+      <stop offset="100%" style="stop-color:#059669"/>
+    </linearGradient>
+    <linearGradient id="lip" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#3b82f6"/>
+      <stop offset="100%" style="stop-color:#2563eb"/>
+    </linearGradient>
+    <linearGradient id="post" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#8b5cf6"/>
+      <stop offset="100%" style="stop-color:#7c3aed"/>
+    </linearGradient>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="900" height="520" rx="12" fill="url(#bg)"/>
+
+  <!-- Title -->
+  <text x="450" y="38" text-anchor="middle" font-size="18" font-weight="700" fill="#e2e8f0">Avatar Renderer MCP — Enhanced Pipeline Architecture</text>
+
+  <!-- Input -->
+  <rect x="20" y="60" width="140" height="60" rx="8" fill="#334155" filter="url(#shadow)"/>
+  <text x="90" y="85" text-anchor="middle" font-size="11" font-weight="600" fill="#e2e8f0">Input</text>
+  <text x="90" y="103" text-anchor="middle" font-size="9" fill="#94a3b8">Image + Audio + Text</text>
+
+  <!-- Arrow from input -->
+  <line x1="160" y1="90" x2="195" y2="90" stroke="#64748b" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- Stage 1: TTS -->
+  <rect x="200" y="55" width="120" height="70" rx="8" fill="url(#tts)" filter="url(#shadow)"/>
+  <text x="260" y="78" text-anchor="middle" font-size="10" font-weight="700" fill="#fff">TTS Stage</text>
+  <text x="260" y="93" text-anchor="middle" font-size="8" fill="#c7d2fe">CosyVoice</text>
+  <text x="260" y="106" text-anchor="middle" font-size="8" fill="#c7d2fe">Chatterbox</text>
+
+  <!-- Arrow -->
+  <line x1="320" y1="90" x2="355" y2="90" stroke="#64748b" stroke-width="2"/>
+
+  <!-- Stage 2: Pre-Motion -->
+  <rect x="360" y="55" width="120" height="70" rx="8" fill="url(#pre)" filter="url(#shadow)"/>
+  <text x="420" y="78" text-anchor="middle" font-size="10" font-weight="700" fill="#fff">Pre-Motion</text>
+  <text x="420" y="93" text-anchor="middle" font-size="8" fill="#fef3c7">Emotion Detection</text>
+  <text x="420" y="106" text-anchor="middle" font-size="8" fill="#fef3c7">Audio2Emotion</text>
+
+  <!-- Arrow -->
+  <line x1="480" y1="90" x2="515" y2="90" stroke="#64748b" stroke-width="2"/>
+
+  <!-- Stage 3: Motion Driver -->
+  <rect x="520" y="55" width="130" height="70" rx="8" fill="url(#motion)" filter="url(#shadow)"/>
+  <text x="585" y="78" text-anchor="middle" font-size="10" font-weight="700" fill="#fff">Motion Driver</text>
+  <text x="585" y="93" text-anchor="middle" font-size="8" fill="#d1fae5">LivePortrait | FOMM</text>
+  <text x="585" y="106" text-anchor="middle" font-size="8" fill="#d1fae5">Hallo3 | GauSplat</text>
+
+  <!-- Arrow -->
+  <line x1="650" y1="90" x2="685" y2="90" stroke="#64748b" stroke-width="2"/>
+
+  <!-- Stage 4: Lip-Sync -->
+  <rect x="690" y="55" width="120" height="70" rx="8" fill="url(#lip)" filter="url(#shadow)"/>
+  <text x="750" y="78" text-anchor="middle" font-size="10" font-weight="700" fill="#fff">Lip-Sync</text>
+  <text x="750" y="93" text-anchor="middle" font-size="8" fill="#bfdbfe">MuseTalk | LatentSync</text>
+  <text x="750" y="106" text-anchor="middle" font-size="8" fill="#bfdbfe">Diff2Lip | Wav2Lip</text>
+
+  <!-- Arrow down from lip-sync -->
+  <line x1="750" y1="125" x2="750" y2="155" stroke="#64748b" stroke-width="2"/>
+
+  <!-- Stage 5: Post-Process -->
+  <rect x="620" y="160" width="260" height="70" rx="8" fill="url(#post)" filter="url(#shadow)"/>
+  <text x="750" y="183" text-anchor="middle" font-size="10" font-weight="700" fill="#fff">Post-Processing</text>
+  <text x="750" y="198" text-anchor="middle" font-size="8" fill="#ddd6fe">Eye Gaze + Blink | Viseme Guided | Gesture Animation | GFPGAN</text>
+
+  <!-- Arrow down -->
+  <line x1="750" y1="230" x2="750" y2="260" stroke="#64748b" stroke-width="2"/>
+
+  <!-- Output -->
+  <rect x="680" y="260" width="140" height="50" rx="8" fill="#334155" filter="url(#shadow)"/>
+  <text x="750" y="285" text-anchor="middle" font-size="11" font-weight="600" fill="#10b981">Output MP4</text>
+  <text x="750" y="299" text-anchor="middle" font-size="9" fill="#94a3b8">w/ Audio Stream</text>
+
+  <!-- Enhancement Cards (bottom) -->
+  <text x="450" y="350" text-anchor="middle" font-size="14" font-weight="700" fill="#e2e8f0">10 Enhancement Modules</text>
+
+  <!-- Row 1 -->
+  <rect x="20" y="370" width="160" height="55" rx="6" fill="#1e293b" stroke="#6366f1" stroke-width="1.5"/>
+  <text x="100" y="392" text-anchor="middle" font-size="9" font-weight="600" fill="#6366f1">1. Emotion Expressions</text>
+  <text x="100" y="407" text-anchor="middle" font-size="8" fill="#94a3b8">Audio prosody + NLP</text>
+
+  <rect x="195" y="370" width="140" height="55" rx="6" fill="#1e293b" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="265" y="392" text-anchor="middle" font-size="9" font-weight="600" fill="#3b82f6">2. MuseTalk Lip-Sync</text>
+  <text x="265" y="407" text-anchor="middle" font-size="8" fill="#94a3b8">30+ FPS real-time</text>
+
+  <rect x="350" y="370" width="140" height="55" rx="6" fill="#1e293b" stroke="#8b5cf6" stroke-width="1.5"/>
+  <text x="420" y="392" text-anchor="middle" font-size="9" font-weight="600" fill="#8b5cf6">3. Eye Gaze + Blink</text>
+  <text x="420" y="407" text-anchor="middle" font-size="8" fill="#94a3b8">Procedural, no model</text>
+
+  <rect x="505" y="370" width="140" height="55" rx="6" fill="#1e293b" stroke="#10b981" stroke-width="1.5"/>
+  <text x="575" y="392" text-anchor="middle" font-size="9" font-weight="600" fill="#10b981">4. LivePortrait Driver</text>
+  <text x="575" y="407" text-anchor="middle" font-size="8" fill="#94a3b8">Expression control</text>
+
+  <rect x="660" y="370" width="140" height="55" rx="6" fill="#1e293b" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="730" y="392" text-anchor="middle" font-size="9" font-weight="600" fill="#f59e0b">5. LatentSync Lip-Sync</text>
+  <text x="730" y="407" text-anchor="middle" font-size="8" fill="#94a3b8">Latent-space diffusion</text>
+
+  <!-- Row 2 -->
+  <rect x="20" y="440" width="160" height="55" rx="6" fill="#1e293b" stroke="#ef4444" stroke-width="1.5"/>
+  <text x="100" y="462" text-anchor="middle" font-size="9" font-weight="600" fill="#ef4444">6. Hallo3 Cinematic</text>
+  <text x="100" y="477" text-anchor="middle" font-size="8" fill="#94a3b8">DiT-based, MIT license</text>
+
+  <rect x="195" y="440" width="140" height="55" rx="6" fill="#1e293b" stroke="#06b6d4" stroke-width="1.5"/>
+  <text x="265" y="462" text-anchor="middle" font-size="9" font-weight="600" fill="#06b6d4">7. CosyVoice TTS</text>
+  <text x="265" y="477" text-anchor="middle" font-size="8" fill="#94a3b8">Emotional prosody</text>
+
+  <rect x="350" y="440" width="140" height="55" rx="6" fill="#1e293b" stroke="#ec4899" stroke-width="1.5"/>
+  <text x="420" y="462" text-anchor="middle" font-size="9" font-weight="600" fill="#ec4899">8. Viseme Guided</text>
+  <text x="420" y="477" text-anchor="middle" font-size="8" fill="#94a3b8">Phoneme-accurate lips</text>
+
+  <rect x="505" y="440" width="140" height="55" rx="6" fill="#1e293b" stroke="#84cc16" stroke-width="1.5"/>
+  <text x="575" y="462" text-anchor="middle" font-size="9" font-weight="600" fill="#84cc16">9. Gesture Animation</text>
+  <text x="575" y="477" text-anchor="middle" font-size="8" fill="#94a3b8">Co-speech gestures</text>
+
+  <rect x="660" y="440" width="140" height="55" rx="6" fill="#1e293b" stroke="#f97316" stroke-width="1.5"/>
+  <text x="730" y="462" text-anchor="middle" font-size="9" font-weight="600" fill="#f97316">10. Gaussian Splatting</text>
+  <text x="730" y="477" text-anchor="middle" font-size="8" fill="#94a3b8">3DGS real-time</text>
+</svg>

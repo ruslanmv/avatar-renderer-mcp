@@ -238,16 +238,16 @@ def generate_audio(text: str, language: str, voice_profile: str):
         return {"status": "error", "error": f"Audio generation failed: {str(e)}"}
 
 @eel.expose
-def generate_video(avatar_path: str, quality_mode: str):
+def generate_video(avatar_path: str, quality_mode: str, enhancements: Optional[list] = None, transcript: Optional[str] = None):
     try:
         if state.is_generating:
             return {"status": "error", "error": "Generation in progress"}
 
         img_path = Path(avatar_path) if avatar_path else state.avatar_image_path
-        
+
         if not img_path or not img_path.exists():
             return {"status": "error", "error": "Invalid avatar image path"}
-        
+
         if not state.generated_audio_path or not state.generated_audio_path.exists():
             return {"status": "error", "error": "Audio file missing. Generate audio first."}
 
@@ -255,7 +255,7 @@ def generate_video(avatar_path: str, quality_mode: str):
         eel.update_status("Initializing AI engine...")
 
         try:
-            from app.pipeline import render_pipeline 
+            from app.pipeline import render_pipeline
         except ImportError as e:
             state.is_generating = False
             return {"status": "error", "error": f"Backend pipeline import failed: {e}"}
@@ -263,14 +263,25 @@ def generate_video(avatar_path: str, quality_mode: str):
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         video_out = OUTPUT_DIR / f"avatar_{timestamp}.mp4"
 
-        eel.update_status(f"Rendering ({QUALITY_MODES.get(quality_mode, quality_mode)})... This may take time.")
+        # Build enhancement status message
+        enh_count = len(enhancements) if enhancements else 0
+        mode_label = QUALITY_MODES.get(quality_mode, quality_mode)
+        if enh_count > 0:
+            eel.update_status(f"Rendering ({mode_label}) with {enh_count} enhancements...")
+        else:
+            eel.update_status(f"Rendering ({mode_label})... This may take time.")
+
+        # Clean transcript: skip empty strings
+        clean_transcript = transcript.strip() if transcript and transcript.strip() else None
 
         # --- EXECUTE PIPELINE ---
         result_path = render_pipeline(
             face_image=str(img_path),
             audio=str(state.generated_audio_path),
             out_path=str(video_out),
-            quality_mode=quality_mode
+            quality_mode=quality_mode,
+            enhancements=enhancements if enhancements else None,
+            transcript=clean_transcript,
         )
 
         state.output_video_path = Path(result_path)
@@ -291,6 +302,28 @@ def generate_video(avatar_path: str, quality_mode: str):
         import traceback
         traceback.print_exc()
         return {"status": "error", "error": f"Render failed: {str(e)}"}
+
+@eel.expose
+def get_enhancement_info():
+    """Return info about all enhancement modules and their availability."""
+    try:
+        from app.enhancements import registry as enhancement_registry
+        all_enh = enhancement_registry.list_all()
+        details = []
+        for enh in all_enh:
+            details.append({
+                "name": enh.name,
+                "stage": enh.stage,
+                "available": enh.is_available(),
+            })
+        available_count = sum(1 for d in details if d["available"])
+        return {
+            "total": len(details),
+            "available": available_count,
+            "details": details,
+        }
+    except ImportError:
+        return {"total": 10, "available": 0, "details": []}
 
 @eel.expose
 def set_avatar_path(path: str):

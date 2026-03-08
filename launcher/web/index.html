@@ -12,10 +12,10 @@
     <div class="app-container">
         <aside class="sidebar">
             <div class="brand">
-                <h1>🤖 AvatarStudio</h1>
+                <h1>AvatarStudio</h1>
                 <p>AI Video Generator</p>
             </div>
-            
+
             <div class="status-panel">
                 <div class="status-item">
                     <span class="label">API Status</span>
@@ -25,18 +25,24 @@
                     <span class="label">Engine</span>
                     <span class="badge ready">Ready</span>
                 </div>
+                <div class="status-item">
+                    <span class="label">Enhancements</span>
+                    <span id="enh-status" class="badge ready">10 modules</span>
+                </div>
             </div>
 
             <div class="preview-box">
                 <label>Avatar Preview</label>
-                <div class="img-wrapper">
-                    <img id="avatar-preview-img" src="img/placeholder.png" alt="Avatar">
+                <div class="img-wrapper" id="avatar-preview-wrapper">
+                    <img id="avatar-preview-img" alt="Avatar preview"
+                         src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='256' height='256' viewBox='0 0 256 256'%3E%3Crect width='256' height='256' rx='8' fill='%231e1e1e'/%3E%3Ccircle cx='128' cy='105' r='45' fill='%23334155'/%3E%3Ccircle cx='113' cy='97' r='5' fill='%236366f1'/%3E%3Ccircle cx='143' cy='97' r='5' fill='%236366f1'/%3E%3Cpath d='M115 115 Q128 125 141 115' stroke='%236366f1' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3Crect x='88' y='160' width='80' height='30' rx='15' fill='%23334155'/%3E%3Ctext x='128' y='180' text-anchor='middle' font-family='Arial' font-size='11' fill='%2394a3b8'%3ESelect Image%3C/text%3E%3C/svg%3E"
+                         onerror="this.style.display='none'">
                 </div>
             </div>
         </aside>
 
         <main class="main-content">
-            
+
             <div class="panel">
                 <div class="panel-header">
                     <h2>1. Script & Audio</h2>
@@ -56,10 +62,10 @@
                     <div class="samples-row" id="sample-buttons"></div>
 
                     <textarea id="text-input" placeholder="Type what you want your avatar to say..."></textarea>
-                    
+
                     <div class="action-bar">
                         <button id="generate-audio-btn" class="btn primary" onclick="generateAudio()">
-                            <span>🔊</span> Generate Audio
+                            Generate Audio
                         </button>
                         <audio id="audio-player" controls style="display:none"></audio>
                     </div>
@@ -85,6 +91,56 @@
                             <select id="quality"></select>
                         </div>
                     </div>
+
+                    <!-- Enhancement Toggles -->
+                    <div class="enhancements-section">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                            <label style="margin-bottom: 0;">Enhancements</label>
+                            <span id="enh-count" style="color: var(--text-dim); font-size: 0.8rem;">3 selected</span>
+                        </div>
+                        <div class="enhancement-grid">
+                            <label class="enh-toggle" title="Detect emotion from audio and drive facial expressions">
+                                <input type="checkbox" name="enh" value="emotion_expressions" checked>
+                                <span class="enh-chip" style="--enh-color: #6366f1">Emotion</span>
+                            </label>
+                            <label class="enh-toggle" title="Natural blink patterns and gaze micro-saccades">
+                                <input type="checkbox" name="enh" value="eye_gaze_blink" checked>
+                                <span class="enh-chip" style="--enh-color: #8b5cf6">Eye Gaze</span>
+                            </label>
+                            <label class="enh-toggle" title="Breathing and subtle upper-body motion">
+                                <input type="checkbox" name="enh" value="gesture_animation" checked>
+                                <span class="enh-chip" style="--enh-color: #84cc16">Gestures</span>
+                            </label>
+                            <label class="enh-toggle" title="MuseTalk 30+ FPS lip-sync (requires model)">
+                                <input type="checkbox" name="enh" value="musetalk_lipsync">
+                                <span class="enh-chip" style="--enh-color: #3b82f6">MuseTalk</span>
+                            </label>
+                            <label class="enh-toggle" title="LivePortrait expression control (requires model)">
+                                <input type="checkbox" name="enh" value="liveportrait_driver">
+                                <span class="enh-chip" style="--enh-color: #10b981">LivePortrait</span>
+                            </label>
+                            <label class="enh-toggle" title="LatentSync latent-space lip-sync (requires model)">
+                                <input type="checkbox" name="enh" value="latentsync_lipsync">
+                                <span class="enh-chip" style="--enh-color: #f59e0b">LatentSync</span>
+                            </label>
+                            <label class="enh-toggle" title="Hallo3 DiT cinematic mode (requires model)">
+                                <input type="checkbox" name="enh" value="hallo3_cinematic">
+                                <span class="enh-chip" style="--enh-color: #ef4444">Hallo3</span>
+                            </label>
+                            <label class="enh-toggle" title="CosyVoice emotional TTS (requires server)">
+                                <input type="checkbox" name="enh" value="cosyvoice_tts">
+                                <span class="enh-chip" style="--enh-color: #06b6d4">CosyVoice</span>
+                            </label>
+                            <label class="enh-toggle" title="Viseme-guided phoneme-accurate lip shapes">
+                                <input type="checkbox" name="enh" value="viseme_guided">
+                                <span class="enh-chip" style="--enh-color: #ec4899">Viseme</span>
+                            </label>
+                            <label class="enh-toggle" title="3D Gaussian Splatting backend (requires model)">
+                                <input type="checkbox" name="enh" value="gaussian_splatting">
+                                <span class="enh-chip" style="--enh-color: #f97316">3D Gauss</span>
+                            </label>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -104,13 +160,13 @@
 
                     <div class="render-actions">
                         <button id="generate-video-btn" class="btn success large" onclick="generateVideo()">
-                            🎬 Generate Video
+                            Generate Video
                         </button>
-                        
+
                         <div id="post-render-actions" class="post-render-actions hidden">
-                            <button class="btn secondary" onclick="openVideoFile()">▶ Open Player</button>
-                            <button class="btn secondary" onclick="openOutputFolder()">📂 Open Folder</button>
-                            <button class="btn danger" onclick="deleteVideo()">🗑️ Delete / Reset</button>
+                            <button class="btn secondary" onclick="openVideoFile()">Open Player</button>
+                            <button class="btn secondary" onclick="openOutputFolder()">Open Folder</button>
+                            <button class="btn danger" onclick="deleteVideo()">Delete / Reset</button>
                         </div>
                     </div>
                 </div>
