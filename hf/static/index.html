@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Avatar Renderer MCP — Enterprise Demo</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>🎭</text></svg>">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar" id="navbar">
+        <div class="container nav-inner">
+            <div class="brand">
+                <div class="brand-icon"></div>
+                <span class="brand-text">Avatar Renderer MCP</span>
+            </div>
+            <div class="nav-links">
+                <a href="#hero" class="nav-link">Home</a>
+                <a href="#demo" class="nav-link">Demo</a>
+                <a href="#result" class="nav-link">Result</a>
+                <a href="#usecases" class="nav-link">Use Cases</a>
+                <a href="#tech" class="nav-link">Tech</a>
+            </div>
+            <a href="#demo" class="btn btn-primary btn-sm">Get Started</a>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section id="hero" class="hero">
+        <div class="container text-center">
+            <div class="fade-in">
+                <h1 class="hero-title">
+                    <span class="gradient-text">Bring Avatars<br>to Life</span>
+                </h1>
+                <p class="hero-subtitle">
+                    Transform static images into dynamic, AI-powered avatars with
+                    realistic expressions and voice synchronization
+                </p>
+            </div>
+            <div class="fade-in hero-mockup">
+                <div class="mockup-frame">
+                    <div class="mockup-content">
+                        <div class="waveform-bars">
+                            <span></span><span></span><span></span><span></span>
+                            <span></span><span></span><span></span>
+                        </div>
+                        <p class="mockup-label">AI Avatar Demo Video</p>
+                    </div>
+                </div>
+            </div>
+            <div class="fade-in">
+                <a href="#demo" class="btn btn-primary btn-lg glow-effect">
+                    Start Creating &rarr;
+                </a>
+            </div>
+        </div>
+        <div class="hero-particle p1"></div>
+        <div class="hero-particle p2"></div>
+    </section>
+
+    <!-- System Status -->
+    <div class="container" id="system-status">
+        <div class="status-bar" id="status-badges">
+            <span class="sys-badge loading">Checking system...</span>
+        </div>
+    </div>
+
+    <!-- Interactive Demo Section -->
+    <section id="demo" class="section">
+        <div class="container">
+            <div class="section-header fade-in">
+                <h2 class="section-title"><span class="gradient-text">Interactive Demo</span></h2>
+                <p class="section-desc">Experience the power of our AI in three simple steps</p>
+            </div>
+
+            <!-- Step 1: Avatar Selection -->
+            <div class="step fade-in">
+                <div class="step-header">
+                    <div class="step-number">1</div>
+                    <h3>Choose Your Avatar</h3>
+                    <span class="step-hint">(or upload your own)</span>
+                </div>
+                <div class="avatar-grid" id="avatar-grid"></div>
+                <div class="upload-divider">
+                    <span>Or upload your own avatar image (PNG/JPG)</span>
+                </div>
+                <label class="upload-zone" id="avatar-upload-zone">
+                    <div class="upload-content">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="upload-icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        <p id="avatar-upload-text">Click to upload or drag and drop</p>
+                        <small>PNG, JPG up to 10MB</small>
+                    </div>
+                    <input type="file" id="avatar-file-input" accept="image/png,image/jpeg,image/webp" hidden>
+                </label>
+            </div>
+
+            <!-- Step 2: Script & Audio -->
+            <div class="step fade-in">
+                <div class="step-header">
+                    <div class="step-number">2</div>
+                    <h3>Add Script / Audio</h3>
+                    <span class="step-hint">(text or upload)</span>
+                </div>
+                <div class="card">
+                    <textarea id="script-input" placeholder="Type something for the avatar to say..."
+                    >Hello! I'm your AI avatar, ready to bring your content to life with realistic expressions and natural voice synchronization.</textarea>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Upload Audio (WAV/MP3)</label>
+                            <input type="file" id="audio-file-input" accept="audio/*" class="file-input">
+                            <p class="file-label" id="audio-file-label"></p>
+                        </div>
+                        <div class="form-group">
+                            <label>Quality Mode</label>
+                            <select id="quality-mode">
+                                <option value="auto">Auto (recommended)</option>
+                                <option value="real_time">Real-time (~3s, CPU)</option>
+                                <option value="high_quality">High Quality (GPU, ~10-30s)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Enhancement Toggles -->
+                    <div class="enh-section">
+                        <div class="enh-header">
+                            <label>Enhancements</label>
+                            <span id="enh-count">3 selected</span>
+                        </div>
+                        <div class="enh-grid" id="enh-grid"></div>
+                    </div>
+
+                    <div class="btn-row">
+                        <button class="btn btn-secondary" id="sample-btn">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l1.5 4.5h4.5l-3.6 2.7 1.4 4.3L12 12l-3.8 2.5 1.4-4.3L6 7.5h4.5z"/></svg>
+                            Use sample
+                        </button>
+                        <button class="btn btn-danger-outline" id="clear-btn">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                            Clear
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 3: Generate -->
+            <div class="step fade-in">
+                <div class="step-header">
+                    <div class="step-number">3</div>
+                    <h3>Generate Your Avatar</h3>
+                </div>
+                <div class="text-center">
+                    <button class="btn btn-generate glow-effect" id="generate-btn">
+                        <span class="btn-text">
+                            Bring to Life
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                        </span>
+                        <span class="btn-loading" style="display:none">
+                            <div class="spinner"></div>
+                            Generating...
+                        </span>
+                    </button>
+                    <button class="btn btn-ghost" id="reset-btn">Reset</button>
+                    <p class="hint-text" id="generate-hint"></p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- Result Section -->
+    <section id="result" class="section">
+        <div class="container">
+            <div class="section-header fade-in">
+                <h2 class="section-title"><span class="gradient-text">Your AI Avatar</span></h2>
+                <p class="section-desc">Watch your creation come to life with stunning realism</p>
+            </div>
+            <div class="result-frame fade-in">
+                <div class="result-card">
+                    <div class="video-container" id="video-container">
+                        <!-- Progress Overlay -->
+                        <div class="progress-overlay" id="progress-overlay" style="display:none">
+                            <div class="progress-ring-wrap">
+                                <svg class="progress-ring" viewBox="0 0 100 100">
+                                    <circle class="ring-bg" r="45" cx="50" cy="50"/>
+                                    <circle class="ring-fg" id="progress-circle" r="45" cx="50" cy="50" stroke-dasharray="283" stroke-dashoffset="283"/>
+                                </svg>
+                                <div class="progress-pct" id="progress-pct">0%</div>
+                            </div>
+                            <p class="progress-status" id="progress-status">Initializing...</p>
+                        </div>
+                        <!-- Video Player -->
+                        <video id="video-player" controls autoplay loop muted playsinline style="display:none"></video>
+                        <!-- Placeholder -->
+                        <div class="video-placeholder" id="video-placeholder">
+                            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3"><rect x="2" y="2" width="20" height="20" rx="2.18"/><circle cx="12" cy="12" r="3"/><path d="M2 17l5-5 3 3 4-4 8 8"/></svg>
+                            <p>Your generated avatar will appear here</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="result-actions">
+                    <button class="btn btn-success" id="download-btn" disabled>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        Download MP4
+                    </button>
+                    <button class="btn btn-purple" id="create-another-btn">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                        Create Another
+                    </button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- Use Cases -->
+    <section id="usecases" class="section">
+        <div class="container">
+            <div class="section-header fade-in">
+                <h2 class="section-title"><span class="gradient-text">Use Cases</span></h2>
+                <p class="section-desc">Transform industries with AI-powered avatars</p>
+            </div>
+            <div class="usecase-grid">
+                <div class="usecase-card fade-in" style="--card-color: #06b6d4">
+                    <div class="usecase-icon" style="background:linear-gradient(135deg,#06b6d4,#3b82f6)">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>
+                    </div>
+                    <h3>Customer Support</h3>
+                    <p>24/7 AI support agents with natural conversations</p>
+                </div>
+                <div class="usecase-card fade-in" style="--card-color: #10b981">
+                    <div class="usecase-icon" style="background:linear-gradient(135deg,#10b981,#34d399)">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M12 12h.01"/><path d="M17 12h.01"/><path d="M7 12h.01"/></svg>
+                    </div>
+                    <h3>Game NPCs</h3>
+                    <p>Dynamic NPCs with unique personalities and dialogue</p>
+                </div>
+                <div class="usecase-card fade-in" style="--card-color: #a855f7">
+                    <div class="usecase-icon" style="background:linear-gradient(135deg,#a855f7,#ec4899)">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>
+                    </div>
+                    <h3>AI Teacher</h3>
+                    <p>Personalized educational avatars that adapt to learning styles</p>
+                </div>
+                <div class="usecase-card fade-in" style="--card-color: #f97316">
+                    <div class="usecase-icon" style="background:linear-gradient(135deg,#f97316,#ef4444)">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>
+                    </div>
+                    <h3>Marketing</h3>
+                    <p>Brand ambassadors delivering consistent messaging</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- Tech Specs -->
+    <section id="tech" class="section">
+        <div class="container">
+            <div class="section-header fade-in">
+                <h2 class="section-title"><span class="gradient-text">Technical Specifications</span></h2>
+            </div>
+            <div class="tech-grid">
+                <div class="tech-item fade-in">
+                    <div class="tech-icon" style="background:linear-gradient(135deg,#06b6d4,#3b82f6)">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                    </div>
+                    <h3>Real-time Processing</h3>
+                    <p>Generate avatars in under 60 seconds</p>
+                </div>
+                <div class="tech-item fade-in">
+                    <div class="tech-icon" style="background:linear-gradient(135deg,#10b981,#34d399)">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/></svg>
+                    </div>
+                    <h3>MP4 Output</h3>
+                    <p>High-quality 1080p video export</p>
+                </div>
+                <div class="tech-item fade-in">
+                    <div class="tech-icon" style="background:linear-gradient(135deg,#a855f7,#ec4899)">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2M15 20v2M2 15h2M20 15h2M9 2v2M9 20v2M2 9h2M20 9h2"/></svg>
+                    </div>
+                    <h3>AI Models</h3>
+                    <p>Advanced neural networks for lifelike results</p>
+                </div>
+            </div>
+            <div class="text-center fade-in" style="margin-top:4rem">
+                <h2 class="cta-title"><span class="gradient-text">Create Your First Avatar</span></h2>
+                <p class="section-desc" style="margin-bottom:2rem">Join thousands of creators bringing their ideas to life with AI avatars</p>
+                <a href="#demo" class="btn btn-primary btn-lg glow-effect">
+                    Start Free Trial
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l1.5 4.5h4.5l-3.6 2.7 1.4 4.3L12 12l-3.8 2.5 1.4-4.3L6 7.5h4.5z"/></svg>
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container footer-inner">
+            <div class="footer-brand">
+                <div class="brand">
+                    <div class="brand-icon"></div>
+                    <span class="brand-text">Avatar Renderer MCP</span>
+                </div>
+                <p class="footer-copy">&copy; 2025 Avatar Renderer MCP. All rights reserved.</p>
+            </div>
+            <div class="footer-links">
+                <a href="https://github.com/ruslanmv/avatar-renderer-mcp" target="_blank" class="footer-link" title="GitHub">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0112 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/></svg>
+                </a>
+                <a href="https://ruslanmv.com" target="_blank" class="footer-link" title="Website">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                </a>
+            </div>
+        </div>
+    </footer>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

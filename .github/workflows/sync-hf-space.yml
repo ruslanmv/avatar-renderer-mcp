@@ -1,0 +1,76 @@
+name: Sync to Hugging Face Space (force-by-default)
+
+on:
+  push:
+    branches: ["main", "master"]
+  workflow_dispatch: {}
+
+jobs:
+  sync-to-hub:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: hf-space-sync-avatar-renderer
+      cancel-in-progress: false
+    env:
+      HF_USERNAME: ${{ secrets.HF_USERNAME }}
+      SPACE_NAME:  ${{ secrets.SPACE_NAME }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build deploy tree and push to HF Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          set -e
+
+          if [ -z "$HF_USERNAME" ] || [ -z "$SPACE_NAME" ]; then
+            echo "Missing HF_USERNAME or SPACE_NAME repo Secrets."
+            exit 1
+          fi
+          if [ -z "$HF_TOKEN" ]; then
+            echo "Missing HF_TOKEN secret."
+            exit 1
+          fi
+
+          REMOTE_URL="https://${HF_USERNAME}:${HF_TOKEN}@huggingface.co/spaces/${HF_USERNAME}/${SPACE_NAME}"
+
+          DEPLOY_DIR=$(mktemp -d)
+          echo "Building deploy tree in $DEPLOY_DIR ..."
+
+          # HF Space metadata
+          cp hf/README.md "$DEPLOY_DIR/README.md"
+          cp hf/Dockerfile "$DEPLOY_DIR/Dockerfile"
+          cp hf/start.sh "$DEPLOY_DIR/start.sh"
+
+          # Enterprise static frontend
+          cp -r hf/static "$DEPLOY_DIR/static"
+
+          # Python backend
+          cp -r app "$DEPLOY_DIR/app"
+          # Remove binary voice files (HF rejects binaries without xet)
+          rm -rf "$DEPLOY_DIR/app/voices"
+
+          # Project metadata
+          cp pyproject.toml "$DEPLOY_DIR/"
+          cp LICENSE "$DEPLOY_DIR/"
+          cp mcp-tool.json "$DEPLOY_DIR/"
+
+          # Model download script
+          mkdir -p "$DEPLOY_DIR/scripts"
+          cp scripts/download_models.sh "$DEPLOY_DIR/scripts/"
+
+          cd "$DEPLOY_DIR"
+          git init -b main
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Deploy from ${GITHUB_SHA::8}"
+
+          echo "Pushing to HF Space..."
+          git push --force "$REMOTE_URL" main
+
+          echo "Done: https://huggingface.co/spaces/${HF_USERNAME}/${SPACE_NAME}"

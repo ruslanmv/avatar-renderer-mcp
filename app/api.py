@@ -20,7 +20,8 @@ from typing import Optional
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .settings import Settings  # pydantic-based env loader
@@ -68,6 +69,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "*",
         "http://localhost:3000",
         "http://localhost:3001",
         "https://*.vercel.app",
@@ -77,6 +79,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ───────────────── Static frontend (HF Spaces / Docker) ─────────────────── #
+_STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+if _STATIC_DIR.is_dir():
+    app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+
+    @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+    def serve_frontend():
+        index = _STATIC_DIR / "index.html"
+        if index.exists():
+            return HTMLResponse(index.read_text())
+        return HTMLResponse("<h1>Avatar Renderer MCP</h1><p>API is running. Visit <a href='/docs'>/docs</a></p>")
 
 WORK_ROOT = Path("/tmp/avatar-jobs")
 WORK_ROOT.mkdir(parents=True, exist_ok=True)
