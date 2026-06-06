@@ -19,16 +19,31 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+)
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from . import auth_hf, security, users_db  # stdlib/requests-only; safe to import
 from .settings import Settings  # pydantic-based env loader
 
 settings = Settings()
 log = logging.getLogger("avatar-renderer.api")
+
+# Initialise the auth database when sign-in is enabled (no-op otherwise).
+if settings.AUTH_ENABLED:
+    users_db.init_db(settings.DATABASE_URL)
+    log.info("Auth enabled — SQLite store at %s", settings.DATABASE_URL)
 
 # ─────────────────── TTS imports ───────────────────────────────────────── #
 try:
@@ -97,6 +112,151 @@ if _STATIC_DIR.is_dir():
 
 WORK_ROOT = Path("/tmp/avatar-jobs")
 WORK_ROOT.mkdir(parents=True, exist_ok=True)
+
+
+# ───────────────────────── Auth dependencies ─────────────────────────────── #
+def _session_token_from_request(request: Request) -> Optional[str]:
+    """Extract the app session token from the Authorization header or query."""
+    return (
+        security.extract_bearer_token(request.headers.get("Authorization"))
+        or request.query_params.get("session_token")
+    )
+
+
+def get_optional_user(request: Request) -> Optional[dict]:
+    """Return the signed-in user, or None. Always None when AUTH is disabled."""
+    if not settings.AUTH_ENABLED:
+        return None
+    token = _session_token_from_request(request)
+    if not token:
+        return None
+    return users_db.get_user_by_session(settings.DATABASE_URL, token)
+
+
+def require_user(request: Request) -> Optional[dict]:
+    """FastAPI dependency: enforce a valid session when AUTH is enabled.
+
+    When AUTH is disabled this is a no-op (returns None), so existing behaviour
+    and the test suite are unaffected.
+    """
+    if not settings.AUTH_ENABLED:
+        return None
+    user = get_optional_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="authentication required")
+    return user
+
+
+# ───────────────────── Hugging Face OAuth endpoints ──────────────────────── #
+_OAUTH_STATE_COOKIE = "hf_oauth_state"
+
+
+def _require_auth_configured() -> None:
+    if not settings.AUTH_ENABLED:
+        raise HTTPException(503, "authentication is disabled on this server")
+    if not (settings.HF_CLIENT_ID and settings.HF_CLIENT_SECRET and settings.HF_REDIRECT_URI):
+        raise HTTPException(500, "Hugging Face OAuth is not configured (missing HF_CLIENT_* / HF_REDIRECT_URI)")
+
+
+@app.get("/auth/huggingface/login", include_in_schema=True)
+def hf_login():
+    """Redirect the browser to Hugging Face to authorize the app."""
+    _require_auth_configured()
+    state = security.make_oauth_state(settings.SESSION_SECRET)
+    url = auth_hf.build_authorize_url(
+        authorize_url=settings.HF_OAUTH_AUTHORIZE_URL,
+        client_id=settings.HF_CLIENT_ID,
+        redirect_uri=settings.HF_REDIRECT_URI,
+        scopes=settings.HF_OAUTH_SCOPES,
+        state=state,
+    )
+    resp = RedirectResponse(url, status_code=302)
+    # First-party cookie on the backend domain — used to verify the callback.
+    resp.set_cookie(
+        _OAUTH_STATE_COOKIE, state, max_age=600, httponly=True, secure=True, samesite="lax"
+    )
+    return resp
+
+
+@app.get("/auth/huggingface/callback", include_in_schema=True)
+def hf_callback(request: Request, code: Optional[str] = None, state: Optional[str] = None):
+    """Handle the OAuth redirect: exchange code, upsert user, issue a session."""
+    _require_auth_configured()
+    if not code:
+        raise HTTPException(400, "missing authorization code")
+
+    cookie_state = request.cookies.get(_OAUTH_STATE_COOKIE)
+    if not security.verify_oauth_state(settings.SESSION_SECRET, state) or state != cookie_state:
+        raise HTTPException(400, "invalid OAuth state")
+
+    try:
+        token_data = auth_hf.exchange_code_for_token(
+            token_url=settings.HF_OAUTH_TOKEN_URL,
+            client_id=settings.HF_CLIENT_ID,
+            client_secret=settings.HF_CLIENT_SECRET,
+            redirect_uri=settings.HF_REDIRECT_URI,
+            code=code,
+        )
+        userinfo = auth_hf.fetch_user_info(
+            userinfo_url=settings.HF_OAUTH_USERINFO_URL,
+            access_token=token_data["access_token"],
+        )
+    except auth_hf.HuggingFaceAuthError as exc:
+        log.warning("OAuth failed: %s", exc)
+        raise HTTPException(502, f"Hugging Face OAuth failed: {exc}") from exc
+
+    profile = auth_hf.normalize_profile(userinfo)
+    if not profile["hf_user_id"]:
+        raise HTTPException(502, "Hugging Face userinfo missing account id")
+
+    user = users_db.upsert_user(
+        settings.DATABASE_URL,
+        hf_user_id=profile["hf_user_id"],
+        hf_username=profile["hf_username"],
+        hf_email=profile["hf_email"],
+        hf_access_token=token_data["access_token"],
+    )
+
+    session_token = security.new_session_token()
+    users_db.create_session(
+        settings.DATABASE_URL,
+        user_id=user["id"],
+        session_token=session_token,
+        ttl_hours=settings.SESSION_TTL_HOURS,
+    )
+
+    # Hand the app session token to the frontend, then clear the state cookie.
+    sep = "&" if "?" in settings.FRONTEND_URL else "?"
+    redirect = RedirectResponse(f"{settings.FRONTEND_URL}{sep}session_token={session_token}", status_code=302)
+    redirect.delete_cookie(_OAUTH_STATE_COOKIE)
+    return redirect
+
+
+@app.get("/me")
+def me(user: Optional[dict] = Depends(require_user)):
+    """Return the signed-in user's public profile (never the HF access token)."""
+    if user is None:
+        # AUTH disabled — report an anonymous/open server so the frontend adapts.
+        return JSONResponse({"authenticated": False, "authEnabled": settings.AUTH_ENABLED})
+    return JSONResponse(
+        {
+            "authenticated": True,
+            "authEnabled": True,
+            "id": user["id"],
+            "hfUserId": user["hf_user_id"],
+            "username": user["hf_username"],
+            "email": user["hf_email"],
+        }
+    )
+
+
+@app.post("/logout")
+def logout(request: Request):
+    """Invalidate the current session token."""
+    token = _session_token_from_request(request)
+    if token:
+        users_db.delete_session(settings.DATABASE_URL, token)
+    return JSONResponse({"status": "logged_out"})
 
 
 # ─────────────────────────── Pydantic models ────────────────────────────── #
@@ -173,8 +333,13 @@ def _render_video_thread(payload: dict):
 
 # ───────────────────────────── REST endpoints ────────────────────────────── #
 @app.post("/render")
-def render_job(body: RenderBody, bg: BackgroundTasks):
-    """Start a render job and return jobId + status URL."""
+def render_job(body: RenderBody, bg: BackgroundTasks, user: Optional[dict] = Depends(require_user)):
+    """Start a render job from server-side file paths and return jobId + status URL.
+
+    Note: this endpoint takes server-side paths and is intended for trusted
+    callers. When AUTH_ENABLED it requires a valid session; browser/SaaS users
+    should use /render-upload instead.
+    """
     job_id = str(uuid.uuid4())
     job_dir = WORK_ROOT / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -200,6 +365,9 @@ def render_job(body: RenderBody, bg: BackgroundTasks):
     # save original request
     (job_dir / "request.json").write_text(json.dumps(body.model_dump(by_alias=True), indent=2))
 
+    if user is not None:
+        users_db.record_job(settings.DATABASE_URL, user_id=user["id"], job_id=job_id)
+
     if celery_available:
         task = render_task.delay(payload)  # type: ignore[union-attr]
         (job_dir / "celery_id").write_text(task.id)
@@ -223,6 +391,7 @@ async def render_upload(
     qualityMode: str = Form("auto"),
     enhancements: Optional[str] = Form(None),
     transcript: Optional[str] = Form(None),
+    user: Optional[dict] = Depends(require_user),
 ):
     """Upload avatar image + audio, start render job, return jobId + status URL.
 
@@ -273,6 +442,10 @@ async def render_upload(
         )
     )
 
+    # Record ownership so the job can only be polled by the user who created it.
+    if user is not None:
+        users_db.record_job(settings.DATABASE_URL, user_id=user["id"], job_id=job_id)
+
     if celery_available:
         task = render_task.delay(payload)  # type: ignore[union-attr]
         (job_dir / "celery_id").write_text(task.id)
@@ -289,14 +462,24 @@ async def render_upload(
 
 
 @app.get("/status/{job_id}")
-def get_status(job_id: str):
+def get_status(job_id: str, user: Optional[dict] = Depends(require_user)):
     """Fetch job state or return the completed MP4."""
     job_dir = WORK_ROOT / job_id
     if not job_dir.exists():
         raise HTTPException(404, "job not found")
 
+    # Enforce ownership when auth is enabled.
+    if user is not None:
+        owner = users_db.get_job_owner(settings.DATABASE_URL, job_id)
+        if owner is not None and owner != user["id"]:
+            raise HTTPException(403, "you do not own this job")
+
     out_mp4 = job_dir / "out.mp4"
     if out_mp4.exists():
+        if user is not None:
+            users_db.update_job_status(
+                settings.DATABASE_URL, job_id=job_id, status="finished", completed=True
+            )
         return FileResponse(out_mp4, media_type="video/mp4")
 
     # Surface a failed render rather than reporting "processing" forever.
