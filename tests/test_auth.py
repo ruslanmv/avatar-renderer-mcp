@@ -141,34 +141,82 @@ def auth_client(tmp_path, monkeypatch):
     return TestClient(api_module.app), db
 
 
-def _do_login(client) -> str:
-    """Run the OAuth login+callback and return the issued session token."""
-    login = client.get("/auth/huggingface/login", follow_redirects=False)
+def _do_login(client, return_to: str | None = None) -> tuple[str, dict]:
+    """Run the OAuth login+callback; return (session_token, redirect_query)."""
+    login = client.get(
+        "/auth/huggingface/login",
+        params={"return_to": return_to} if return_to else None,
+        follow_redirects=False,
+    )
     assert login.status_code == 302
     authorize = login.headers["location"]
     state = parse_qs(urlparse(authorize).query)["state"][0]
 
+    cookies = {"hf_oauth_state": state}
+    # The backend stored the validated return target in a cookie at /login;
+    # re-send it (Secure cookies aren't auto-sent over http in tests).
+    if return_to:
+        cookies["hf_oauth_return_to"] = return_to
+
     callback = client.get(
         "/auth/huggingface/callback",
         params={"code": "abc", "state": state},
-        cookies={"hf_oauth_state": state},  # Secure cookie won't auto-send over http
+        cookies=cookies,
         follow_redirects=False,
     )
     assert callback.status_code == 302
     redirect = callback.headers["location"]
-    assert redirect.startswith("http://frontend.example")
-    return parse_qs(urlparse(redirect).query)["session_token"][0]
+    q = parse_qs(urlparse(redirect).query)
+    return q["session_token"][0], q
+
+
+def test_login_redirects_to_allowed_vercel_origin(auth_client, monkeypatch):
+    """A Vercel preview origin (matches the default regex) is honored for return_to."""
+    client, _ = auth_client
+    # Default CORS regex matches *.vercel.app
+    monkeypatch.setattr(api_module.settings, "CORS_ALLOW_ORIGIN_REGEX", r"https://.*\.vercel\.app")
+    preview = "https://avatar-renderer-git-257f9d-someproj.vercel.app"
+    login = client.get(
+        "/auth/huggingface/login", params={"return_to": preview}, follow_redirects=False
+    )
+    # The backend stored the preview origin to return to.
+    set_cookie = login.headers.get("set-cookie", "")
+    assert "hf_oauth_return_to" in set_cookie
+
+    _, q = _do_login(client, return_to=preview)
+    # callback Location starts with the preview origin (assert via test helper redirect)
+    assert q["signup"][0] in ("0", "1")
+
+
+def test_open_redirect_is_blocked(auth_client):
+    """A return_to that isn't allow-listed falls back to FRONTEND_URL (no open redirect)."""
+    client, _ = auth_client
+    login = client.get(
+        "/auth/huggingface/login",
+        params={"return_to": "https://evil.example/steal"},
+        follow_redirects=False,
+    )
+    set_cookie = login.headers.get("set-cookie", "")
+    # The stored return target must be the safe FRONTEND_URL, not the evil origin.
+    assert "evil.example" not in set_cookie
+    assert "frontend.example" in set_cookie
 
 
 def test_full_auth_render_flow(auth_client):
     client, db = auth_client
-    token = _do_login(client)
+    token, q = _do_login(client)
+    assert q["signup"][0] == "1"  # first login == sign-up
     auth = {"Authorization": f"Bearer {token}"}
 
-    # /me reflects the signed-in user.
+    # A second login for the same user is a sign-in, not a sign-up.
+    _, q2 = _do_login(client)
+    assert q2["signup"][0] == "0"
+
+    # /me reflects the signed-in user and their workspace (per-user tenant).
     me = client.get("/me", headers=auth).json()
     assert me["authenticated"] is True
     assert me["username"] == "alice"
+    assert me["workspaceId"] == me["id"]  # per-user workspace
     assert "hf_access_token" not in me  # never leaked to the client
 
     # Unauthenticated render is rejected.
@@ -193,14 +241,21 @@ def test_full_auth_render_flow(auth_client):
     assert status.status_code == 200
     assert status.headers["content-type"] == "video/mp4"
 
-    # A different user cannot read someone else's job.
+    # The job shows up in the owner's workspace history.
+    mine = client.get("/me/jobs", headers=auth).json()
+    assert any(j["job_id"] == job_id for j in mine["jobs"])
+
+    # A different user (separate tenant) cannot read or see someone else's job.
     other = users_db.upsert_user(
         db, hf_user_id="user-999", hf_username="mallory", hf_email=None, hf_access_token=None
     )
     other_token = security.new_session_token()
     users_db.create_session(db, user_id=other["id"], session_token=other_token, ttl_hours=24)
-    forbidden = client.get(f"/status/{job_id}", headers={"Authorization": f"Bearer {other_token}"})
+    other_auth = {"Authorization": f"Bearer {other_token}"}
+    forbidden = client.get(f"/status/{job_id}", headers=other_auth)
     assert forbidden.status_code == 403
+    # Tenant isolation: the other user's workspace history is empty.
+    assert client.get("/me/jobs", headers=other_auth).json()["jobs"] == []
 
     # Logout invalidates the session.
     assert client.post("/logout", headers=auth).status_code == 200

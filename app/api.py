@@ -14,10 +14,12 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import uuid
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlencode, urlparse
 
 from fastapi import (
     BackgroundTasks,
@@ -149,6 +151,7 @@ def require_user(request: Request) -> Optional[dict]:
 
 # ───────────────────── Hugging Face OAuth endpoints ──────────────────────── #
 _OAUTH_STATE_COOKIE = "hf_oauth_state"
+_OAUTH_RETURN_COOKIE = "hf_oauth_return_to"
 
 
 def _require_auth_configured() -> None:
@@ -158,10 +161,53 @@ def _require_auth_configured() -> None:
         raise HTTPException(500, "Hugging Face OAuth is not configured (missing HF_CLIENT_* / HF_REDIRECT_URI)")
 
 
+def _allowed_frontend_origins() -> list[str]:
+    """Origins the backend is willing to redirect back to after login."""
+    origins = [o.strip() for o in settings.CORS_ALLOW_ORIGINS.split(",") if o.strip()]
+    # The configured FRONTEND_URL origin is always allowed.
+    fe = urlparse(settings.FRONTEND_URL)
+    if fe.scheme and fe.netloc:
+        origins.append(f"{fe.scheme}://{fe.netloc}")
+    return origins
+
+
+def _is_allowed_return_to(url: Optional[str]) -> bool:
+    """Validate a post-login redirect target against the allowlist + regex.
+
+    Only the scheme://host (origin) is checked; this prevents open-redirect
+    abuse while still letting any approved Vercel preview/prod domain work.
+    """
+    if not url:
+        return False
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return False
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    allowed = _allowed_frontend_origins()
+    if "*" in allowed or origin in allowed:
+        return True
+    regex = settings.CORS_ALLOW_ORIGIN_REGEX
+    return bool(regex) and re.fullmatch(regex, origin) is not None
+
+
+def _resolve_return_to(requested: Optional[str]) -> str:
+    """Pick a safe frontend origin to return to (requested if allowed, else FRONTEND_URL)."""
+    if requested and _is_allowed_return_to(requested):
+        parsed = urlparse(requested)
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return settings.FRONTEND_URL
+
+
 @app.get("/auth/huggingface/login", include_in_schema=True)
-def hf_login():
-    """Redirect the browser to Hugging Face to authorize the app."""
+def hf_login(return_to: Optional[str] = None):
+    """Redirect the browser to Hugging Face to authorize the app.
+
+    ``return_to`` (the frontend's own origin) lets login work across multiple
+    Vercel preview/production domains without reconfiguring the backend; it is
+    validated against the CORS allowlist/regex to prevent open redirects.
+    """
     _require_auth_configured()
+    target = _resolve_return_to(return_to)
     state = security.make_oauth_state(settings.SESSION_SECRET)
     url = auth_hf.build_authorize_url(
         authorize_url=settings.HF_OAUTH_AUTHORIZE_URL,
@@ -171,10 +217,10 @@ def hf_login():
         state=state,
     )
     resp = RedirectResponse(url, status_code=302)
-    # First-party cookie on the backend domain — used to verify the callback.
-    resp.set_cookie(
-        _OAUTH_STATE_COOKIE, state, max_age=600, httponly=True, secure=True, samesite="lax"
-    )
+    # First-party cookies on the backend domain — used to verify the callback.
+    cookie_kw = dict(max_age=600, httponly=True, secure=True, samesite="lax")
+    resp.set_cookie(_OAUTH_STATE_COOKIE, state, **cookie_kw)
+    resp.set_cookie(_OAUTH_RETURN_COOKIE, target, **cookie_kw)
     return resp
 
 
@@ -209,6 +255,9 @@ def hf_callback(request: Request, code: Optional[str] = None, state: Optional[st
     if not profile["hf_user_id"]:
         raise HTTPException(502, "Hugging Face userinfo missing account id")
 
+    # First authorization == sign-up; a returning account == sign-in.
+    is_new_user = users_db.get_user_by_hf_id(settings.DATABASE_URL, profile["hf_user_id"]) is None
+
     user = users_db.upsert_user(
         settings.DATABASE_URL,
         hf_user_id=profile["hf_user_id"],
@@ -225,16 +274,24 @@ def hf_callback(request: Request, code: Optional[str] = None, state: Optional[st
         ttl_hours=settings.SESSION_TTL_HOURS,
     )
 
-    # Hand the app session token to the frontend, then clear the state cookie.
-    sep = "&" if "?" in settings.FRONTEND_URL else "?"
-    redirect = RedirectResponse(f"{settings.FRONTEND_URL}{sep}session_token={session_token}", status_code=302)
+    # Return to the origin that initiated login (validated), defaulting to FRONTEND_URL.
+    return_to = _resolve_return_to(request.cookies.get(_OAUTH_RETURN_COOKIE))
+    query = urlencode({"session_token": session_token, "signup": "1" if is_new_user else "0"})
+    sep = "&" if "?" in return_to else "?"
+    redirect = RedirectResponse(f"{return_to}{sep}{query}", status_code=302)
     redirect.delete_cookie(_OAUTH_STATE_COOKIE)
+    redirect.delete_cookie(_OAUTH_RETURN_COOKIE)
     return redirect
 
 
 @app.get("/me")
 def me(user: Optional[dict] = Depends(require_user)):
-    """Return the signed-in user's public profile (never the HF access token)."""
+    """Return the signed-in user's public profile (never the HF access token).
+
+    In this per-user multitenancy model each user IS their own workspace/tenant,
+    so ``workspaceId`` mirrors the user id. (When orgs are added later this is
+    where the active organization would surface.)
+    """
     if user is None:
         # AUTH disabled — report an anonymous/open server so the frontend adapts.
         return JSONResponse({"authenticated": False, "authEnabled": settings.AUTH_ENABLED})
@@ -243,11 +300,22 @@ def me(user: Optional[dict] = Depends(require_user)):
             "authenticated": True,
             "authEnabled": True,
             "id": user["id"],
+            "workspaceId": user["id"],
             "hfUserId": user["hf_user_id"],
             "username": user["hf_username"],
             "email": user["hf_email"],
         }
     )
+
+
+@app.get("/me/jobs")
+def my_jobs(user: Optional[dict] = Depends(require_user)):
+    """List the signed-in user's render jobs (workspace-scoped history)."""
+    if user is None:
+        # Auth disabled — no per-user history to scope to.
+        return JSONResponse({"authEnabled": False, "jobs": []})
+    jobs = users_db.list_user_jobs(settings.DATABASE_URL, user["id"])
+    return JSONResponse({"authEnabled": True, "jobs": jobs})
 
 
 @app.post("/logout")

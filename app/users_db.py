@@ -87,6 +87,15 @@ def init_db(db_path: str) -> None:
 # Users
 # --------------------------------------------------------------------------- #
 
+def get_user_by_hf_id(db_path: str, hf_user_id: str) -> Optional[dict]:
+    """Return the user row for a Hugging Face account id, or None."""
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM users WHERE hf_user_id = ?", (hf_user_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
 def upsert_user(
     db_path: str,
     *,

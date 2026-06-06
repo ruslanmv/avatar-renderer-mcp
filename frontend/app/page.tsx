@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 
 import HuggingFaceLogin from '../components/HuggingFaceLogin';
-import { authHeaders, captureSessionFromUrl } from '../lib/api';
+import { authHeaders } from '../lib/api';
 
 const API_BASE = process.env.NEXT_PUBLIC_AVATAR_API_BASE || 'http://localhost:8000';
 
@@ -86,11 +86,6 @@ export default function Page() {
   const [statusText, setStatusText] = useState('Initializing...');
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
-
-  // Capture the app session token handed back by the OAuth redirect (if any).
-  useEffect(() => {
-    captureSessionFromUrl();
-  }, []);
 
   useEffect(() => {
     const observer = new IntersectionObserver(

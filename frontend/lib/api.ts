@@ -30,18 +30,24 @@ export function clearSessionToken(): void {
 }
 
 /**
- * Capture `?session_token=...` from the URL after the OAuth redirect, persist
- * it, and strip it from the address bar. Call once on app mount.
+ * Capture `?session_token=...` (and `?signup=`) from the URL after the OAuth
+ * redirect, persist the token, and strip both from the address bar.
+ * Returns whether a token was captured and whether this was a first-time signup.
+ * Call once on app mount.
  */
-export function captureSessionFromUrl(): void {
-  if (typeof window === 'undefined') return;
+export function captureSessionFromUrl(): { captured: boolean; signup: boolean } {
+  if (typeof window === 'undefined') return { captured: false, signup: false };
   const url = new URL(window.location.href);
   const token = url.searchParams.get('session_token');
+  const signup = url.searchParams.get('signup') === '1';
   if (token) {
     setSessionToken(token);
     url.searchParams.delete('session_token');
+    url.searchParams.delete('signup');
     window.history.replaceState({}, '', url.toString());
+    return { captured: true, signup };
   }
+  return { captured: false, signup: false };
 }
 
 export function authHeaders(): Record<string, string> {
@@ -51,8 +57,16 @@ export function authHeaders(): Record<string, string> {
 
 // ----- auth endpoints ------------------------------------------------------
 
-export function getLoginUrl(): string {
-  return `${API_BASE}/auth/huggingface/login`;
+/**
+ * Build the backend login URL, passing this deployment's own origin as
+ * `return_to` so the backend redirects back HERE after OAuth — works across all
+ * Vercel preview/production domains without backend reconfiguration.
+ */
+export function getLoginUrl(returnTo?: string): string {
+  const origin =
+    returnTo ?? (typeof window !== 'undefined' ? window.location.origin : '');
+  const qs = origin ? `?return_to=${encodeURIComponent(origin)}` : '';
+  return `${API_BASE}/auth/huggingface/login${qs}`;
 }
 
 export interface MeResponse {
@@ -80,6 +94,25 @@ export async function logout(): Promise<void> {
     await fetch(`${API_BASE}/logout`, { method: 'POST', headers: authHeaders() });
   } finally {
     clearSessionToken();
+  }
+}
+
+export interface RenderJobRecord {
+  job_id: string;
+  status: string;
+  created_at: string;
+  completed_at: string | null;
+}
+
+/** Fetch the signed-in user's render history (workspace-scoped). */
+export async function fetchMyJobs(): Promise<RenderJobRecord[]> {
+  try {
+    const res = await fetch(`${API_BASE}/me/jobs`, { headers: authHeaders() });
+    if (!res.ok) return [];
+    const body = await res.json();
+    return (body.jobs ?? []) as RenderJobRecord[];
+  } catch {
+    return [];
   }
 }
 
