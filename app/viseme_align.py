@@ -18,6 +18,7 @@ character count – still acceptable for demo UX.
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import subprocess
 import tempfile
@@ -25,6 +26,8 @@ from pathlib import Path
 from typing import List, Dict
 
 import librosa
+
+log = logging.getLogger("avatar-renderer.viseme")
 
 # --------------------------------------------------------------------------- #
 # Config                                                                      #
@@ -54,9 +57,8 @@ def get_viseme_json(audio_wav: str, transcript: str) -> List[Dict]:
 
     if _mfa_available():
         return _align_with_mfa(audio_wav, transcript)
-    else:
-        print("[viseme_align] MFA unavailable – using naive timing.")
-        return _uniform_visemes(audio_wav, transcript)
+    log.info("MFA unavailable – using naive uniform viseme timing.")
+    return _uniform_visemes(audio_wav, transcript)
 
 
 # --------------------------------------------------------------------------- #
@@ -66,7 +68,7 @@ def get_viseme_json(audio_wav: str, transcript: str) -> List[Dict]:
 
 def _mfa_available() -> bool:
     """Return True if the `mfa` binary *and* models are present."""
-    return shutil.which("mfa") and Path(MFA_MODEL).exists() and Path(MFA_DICT).exists()
+    return bool(shutil.which("mfa")) and Path(MFA_MODEL).exists() and Path(MFA_DICT).exists()
 
 
 def _align_with_mfa(audio_wav: str, transcript: str) -> List[Dict]:

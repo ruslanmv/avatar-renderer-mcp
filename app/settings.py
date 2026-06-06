@@ -216,6 +216,60 @@ class Settings(BaseSettings):
     )
 
     # ─────────────────────────────────────────────────────────────────────────
+    # CORS (browser frontend access)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    CORS_ALLOW_ORIGINS: str = Field(
+        default="http://localhost:3000,http://localhost:3001",
+        description=(
+            "Comma-separated list of allowed CORS origins, or '*' for any origin. "
+            "Credentials are only enabled when explicit origins are listed "
+            "(the CORS spec forbids '*' together with credentials)."
+        ),
+    )
+
+    CORS_ALLOW_ORIGIN_REGEX: Optional[str] = Field(
+        default=r"https://.*\.vercel\.app",
+        description=(
+            "Optional regex matching additional allowed origins "
+            "(e.g. Vercel preview deployments). Set empty to disable."
+        ),
+    )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Cloud Object Storage (S3 / IBM COS) — optional result upload
+    # ─────────────────────────────────────────────────────────────────────────
+
+    COS_BUCKET: Optional[str] = Field(
+        default=None,
+        description=(
+            "Target bucket for rendered video upload. If empty, results stay on "
+            "local/PVC storage and no upload is attempted."
+        ),
+    )
+
+    COS_ENDPOINT_URL: Optional[str] = Field(
+        default=None,
+        description=(
+            "S3-compatible endpoint URL (e.g. IBM COS 's3.us-south.cloud-object-storage.appdomain.cloud'). "
+            "Leave empty to use AWS S3 defaults."
+        ),
+    )
+
+    COS_REGION: Optional[str] = Field(
+        default=None,
+        description="Region name for the object storage service (e.g. 'us-south', 'us-east-1').",
+    )
+
+    COS_PUBLIC_BASE_URL: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional public base URL used to build the returned object URL "
+            "(e.g. a CDN domain). Falls back to the endpoint/bucket form when unset."
+        ),
+    )
+
+    # ─────────────────────────────────────────────────────────────────────────
     # FFmpeg Configuration
     # ─────────────────────────────────────────────────────────────────────────
 

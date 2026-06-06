@@ -8,7 +8,7 @@
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![CI](https://img.shields.io/badge/tests-55%20passed-brightgreen.svg)](#testing)
+[![CI](https://img.shields.io/badge/tests-107%20passed-brightgreen.svg)](#testing)
 
 **One image. One audio clip. One realistic talking video.**
 
@@ -37,7 +37,7 @@ No 3D modeling. No motion capture. No video editing. Just AI.
 | **Custom faces** | Requires actors | Generic | Any photo |
 | **Languages** | Re-record | Limited | 23 languages built-in |
 | **Expressions** | Manual | Robotic | AI-driven emotions |
-| **Scale** | 1 at a time | Limited | 100+ videos/hour |
+| **Scale** | 1 at a time | Limited | Batch + queue, GPU-bound |
 
 ---
 
@@ -47,7 +47,7 @@ No 3D modeling. No motion capture. No video editing. Just AI.
 
 **Enterprise & Marketing** — Produce multilingual product demos, training videos, and internal communications at scale. One photo, unlimited videos.
 
-**News & Broadcasting** — Power virtual anchors and live news presenters with real-time rendering under 3 seconds.
+**News & Broadcasting** — Power virtual anchors and live news presenters with low-latency real-time rendering.
 
 **Education** — Create personalized tutoring avatars that explain concepts in any of 23 supported languages.
 
@@ -169,7 +169,7 @@ Built for production from day one:
 - **Distributed Processing** — Celery task queue with Redis/RabbitMQ
 - **Cloud Storage** — S3/COS integration for output delivery
 - **Health Monitoring** — Prometheus metrics and structured logging
-- **CI/CD** — GitHub Actions with 55 automated tests
+- **CI/CD** — GitHub Actions with 107 automated tests
 
 ```bash
 # Docker
@@ -195,11 +195,16 @@ Deploy to **Vercel** with one command. Point it at your GPU backend.
 
 ## Performance
 
-| Metric | Value |
+Figures below are **targets on a modern data-center GPU** (e.g. NVIDIA T4 / A10G)
+for short clips; actual latency and throughput depend on clip length, resolution,
+enabled enhancements, and hardware. Run `python scripts/benchmark.py` to measure
+your own environment.
+
+| Metric | Target (GPU) |
 |---|---|
-| Rendering speed (real-time mode) | Under 3 seconds |
-| Rendering speed (high-quality) | 10-30 seconds |
-| Throughput | 100+ videos/hour per GPU |
+| Rendering latency (real-time mode) | ~1–3 s for short clips |
+| Rendering latency (high-quality) | ~10–30 s |
+| Throughput | Tens of videos/hour per GPU (clip-length dependent) |
 | Supported languages | 23 |
 | Enhancement modules | 10 |
 
@@ -227,7 +232,7 @@ make test
 python -m pytest tests/test_enhancements.py -v
 ```
 
-55 automated tests run in CI on every push — no GPU or models required.
+The full suite (107 tests) runs in CI on every push — no GPU or model downloads required.
 
 ---
 

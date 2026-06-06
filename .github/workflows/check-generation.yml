@@ -54,8 +54,8 @@ jobs:
           echo "- Timestamp: $(date -u)" >> $GITHUB_STEP_SUMMARY
           echo "- Quality Mode: ${{ github.event.inputs.quality_mode || 'auto' }}" >> $GITHUB_STEP_SUMMARY
 
-  unit-tests-enhancements:
-    name: Enhancement Unit Tests
+  unit-tests:
+    name: Full Test Suite (CPU)
     runs-on: ubuntu-latest
     needs: verify-installation
 
@@ -71,37 +71,18 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          python -m pip install pydantic pydantic-settings pytest
-
-      - name: Run enhancement unit tests
-        run: |
-          python -m pytest tests/test_enhancements.py -v --tb=short \
-            --override-ini="addopts=-ra --strict-markers --strict-config"
-
-  unit-tests-pipeline:
-    name: Pipeline Integration Tests
-    runs-on: ubuntu-latest
-    needs: verify-installation
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip setuptools wheel
-          python -m pip install pydantic pydantic-settings pytest
+          # Lightweight deps sufficient to exercise the whole suite on CPU.
+          python -m pip install pydantic pydantic-settings pytest pytest-asyncio pytest-mock \
+                      fastapi "uvicorn[standard]" python-multipart httpx celery redis
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 
-      - name: Run pipeline integration tests
+      - name: Run the full test suite
         run: |
-          python -m pytest tests/test_pipeline.py -v --tb=short \
-            --override-ini="addopts=-ra --strict-markers --strict-config"
+          # Run every test in tests/ so stale tests can't silently rot again.
+          # Coverage/strict-config addopts from pyproject are overridden to keep
+          # this CPU job fast and free of the optional pytest-cov dependency.
+          python -m pytest tests/ -v --tb=short \
+            --override-ini="addopts=-ra --strict-markers"
 
   check-imports:
     name: Check Module Imports
@@ -307,7 +288,7 @@ jobs:
   summary:
     name: Test Summary
     runs-on: ubuntu-latest
-    needs: [verify-installation, unit-tests-enhancements, unit-tests-pipeline, check-imports, check-api-health, test-mcp-server]
+    needs: [verify-installation, unit-tests, check-imports, check-api-health, test-mcp-server]
     if: always()
 
     steps:

@@ -18,48 +18,34 @@ def test_python_version():
 
 
 def test_imports():
-    """Verify all critical imports work."""
+    """Verify critical imports work.
+
+    Core app modules must import. Heavy optional ML/media libraries are skipped
+    gracefully when absent so this health check stays meaningful in a lightweight
+    CI environment as well as a full GPU install.
+    """
+    import pytest
+
     print("\nTesting critical imports...")
 
-    # Core dependencies
+    # Core dependency required by the app modules.
     import torch
     print(f"  ✓ torch {torch.__version__}")
 
-    import torchvision
-    print(f"  ✓ torchvision {torchvision.__version__}")
+    # Optional heavy libraries — only verified when installed.
+    for mod in ("torchvision", "diffusers", "transformers", "librosa", "soundfile", "ffmpeg", "gfpgan"):
+        try:
+            __import__(mod)
+            print(f"  ✓ {mod} installed")
+        except ImportError:
+            print(f"  ⚠ {mod} not installed (optional in this environment)")
 
-    # ML libraries
-    import diffusers
-    print(f"  ✓ diffusers {diffusers.__version__}")
+    # App modules must always import.
+    from app import settings  # noqa: F401
+    print("  ✓ app.settings")
 
-    import transformers
-    print(f"  ✓ transformers {transformers.__version__}")
-
-    # Audio processing
-    import librosa
-    print(f"  ✓ librosa {librosa.__version__}")
-
-    import soundfile
-    print(f"  ✓ soundfile {soundfile.__version__}")
-
-    # Video processing
-    import ffmpeg
-    print(f"  ✓ ffmpeg-python installed")
-
-    # Face enhancement (may have compatibility issues with newer torchvision)
-    try:
-        import gfpgan
-        print(f"  ✓ gfpgan installed")
-    except ImportError as e:
-        print(f"  ⚠ gfpgan import issue (known compatibility): {e}")
-        # This is OK - gfpgan has issues with newer torchvision but still works at runtime
-
-    # App modules
-    from app import settings
-    print(f"  ✓ app.settings")
-
-    from app import pipeline
-    print(f"  ✓ app.pipeline")
+    from app import pipeline  # noqa: F401
+    print("  ✓ app.pipeline")
 
 
 def test_environment_variables():
@@ -78,46 +64,53 @@ def test_pipeline_helpers():
     print("\nTesting pipeline helpers...")
 
     from app.pipeline import (
-        _can_import,
-        _python_ffmpeg_available,
         _ffmpeg_binary_available,
-        _fomm_runtime_available,
+        _ffprobe_binary_available,
+        _resolve_model_root,
+        load_module_from_path,
     )
 
-    # Test import checker
-    assert _can_import("os") is True
-    assert _can_import("nonexistent_module_xyz") is False
-    print("  ✓ _can_import() works")
+    # ffmpeg / ffprobe availability checks return booleans.
+    assert isinstance(_ffmpeg_binary_available(), bool)
+    assert isinstance(_ffprobe_binary_available(), bool)
+    print(f"  ✓ _ffmpeg_binary_available(): {_ffmpeg_binary_available()}")
+    print(f"  ✓ _ffprobe_binary_available(): {_ffprobe_binary_available()}")
 
-    # Test ffmpeg-python check
-    has_ffmpeg_py = _python_ffmpeg_available()
-    print(f"  ✓ _python_ffmpeg_available(): {has_ffmpeg_py}")
+    # Model root resolution returns a Path.
+    assert isinstance(_resolve_model_root(), Path)
+    print(f"  ✓ _resolve_model_root(): {_resolve_model_root()}")
 
-    # Test system ffmpeg check
-    has_ffmpeg_bin = _ffmpeg_binary_available()
-    print(f"  ✓ _ffmpeg_binary_available(): {has_ffmpeg_bin}")
+    # Dynamic module loader rejects missing files.
+    import pytest
 
-    # Test FOMM runtime check
-    fomm_ok, fomm_reason = _fomm_runtime_available()
-    print(f"  ✓ _fomm_runtime_available(): {fomm_ok}")
-    if not fomm_ok:
-        print(f"    Reason: {fomm_reason}")
+    with pytest.raises(ImportError):
+        load_module_from_path("does_not_exist", Path("/nonexistent/module_xyz.py"))
+    print("  ✓ load_module_from_path() raises on missing file")
 
 
 def test_model_paths():
     """Verify model path configuration."""
     print("\nTesting model paths...")
 
-    from app.pipeline import MODEL_ROOT, FOMM_CKPT, D2L_CKPT, SAD_CKPT, W2L_CKPT
+    from app.pipeline import (
+        MODEL_ROOT,
+        FOMM_CKPT,
+        D2L_PAPER_CKPT,
+        D2L_LEGACY_CKPT,
+        W2L_CKPT,
+        GFPGAN_CKPT,
+    )
 
     print(f"  ✓ MODEL_ROOT: {MODEL_ROOT}")
     print(f"  ✓ FOMM_CKPT: {FOMM_CKPT}")
-    print(f"  ✓ D2L_CKPT: {D2L_CKPT}")
-    print(f"  ✓ SAD_CKPT: {SAD_CKPT}")
+    print(f"  ✓ D2L_PAPER_CKPT: {D2L_PAPER_CKPT}")
+    print(f"  ✓ D2L_LEGACY_CKPT: {D2L_LEGACY_CKPT}")
     print(f"  ✓ W2L_CKPT: {W2L_CKPT}")
+    print(f"  ✓ GFPGAN_CKPT: {GFPGAN_CKPT}")
 
     # Verify they're Path objects
-    assert isinstance(MODEL_ROOT, Path)
+    for p in (MODEL_ROOT, FOMM_CKPT, D2L_PAPER_CKPT, D2L_LEGACY_CKPT, W2L_CKPT, GFPGAN_CKPT):
+        assert isinstance(p, Path)
     print("  ✓ Model paths are Path objects")
 
 

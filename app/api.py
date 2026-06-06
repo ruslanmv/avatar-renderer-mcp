@@ -13,6 +13,7 @@ api.py – FastAPI front-door for the Avatar Renderer Pod
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import uuid
 from pathlib import Path
@@ -27,6 +28,7 @@ from pydantic import BaseModel, Field
 from .settings import Settings  # pydantic-based env loader
 
 settings = Settings()
+log = logging.getLogger("avatar-renderer.api")
 
 # ─────────────────── TTS imports ───────────────────────────────────────── #
 try:
@@ -41,19 +43,20 @@ except ImportError:
     tts_available = False
 
 # ─────────────────── Celery optional ────────────────────────────────────── #
+# The Celery app and render task live in app.worker (single source of truth) so
+# the API enqueues exactly the task the worker process consumes. If Celery (or a
+# heavy transitive import) is unavailable, we transparently fall back to running
+# the pipeline in a FastAPI BackgroundTask.
 celery_available = False
 try:
-    from celery import Celery
     from celery.result import AsyncResult
 
-    celery_app = Celery(
-        "avatar_renderer",
-        broker=settings.CELERY_BROKER_URL,
-        backend=settings.CELERY_BACKEND_URL or settings.CELERY_BROKER_URL,
-    )
+    from .worker import celery_app, render_task
+
     celery_available = bool(settings.CELERY_BROKER_URL)
 except ImportError:
     celery_app = None  # type: ignore
+    render_task = None  # type: ignore
 
 # import pipeline after Celery to avoid GPU init on health checks
 from .pipeline import render_pipeline  # noqa: E402
@@ -66,16 +69,16 @@ app = FastAPI(
 )
 
 # ───────────────────────────── CORS setup ────────────────────────────────── #
+# CORS_ALLOW_ORIGINS may be a comma-separated list of explicit origins, or "*".
+# Per the CORS spec a wildcard origin cannot be combined with credentials, so we
+# only enable credentials when explicit origins are configured.
+_cors_origins = [o.strip() for o in settings.CORS_ALLOW_ORIGINS.split(",") if o.strip()]
+_allow_credentials = "*" not in _cors_origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "*",
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "https://*.vercel.app",
-        "https://vercel.app",
-    ],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_origin_regex=settings.CORS_ALLOW_ORIGIN_REGEX,
+    allow_credentials=_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -145,11 +148,13 @@ class TextToAudioResponse(BaseModel):
     error: Optional[str] = Field(None, description="Error message (if status='error')")
 
 
-# ───────────────────────── Celery vs Thread task ─────────────────────────── #
-if celery_available:
-
-    @celery_app.task(name="render_video_task")
-    def _render_video_task(payload: dict):
+# ───────────────────────── Thread fallback task ──────────────────────────── #
+# When Celery is unavailable the pipeline runs in a FastAPI BackgroundTask.
+# Completion and failure are recorded as marker files so /status can report a
+# terminal state instead of hanging on "processing" forever.
+def _render_video_thread(payload: dict):
+    job_dir = WORK_ROOT / payload["job_id"]
+    try:
         render_pipeline(
             face_image=payload["avatar_path"],
             audio=payload["audio_path"],
@@ -160,21 +165,10 @@ if celery_available:
             enhancements=payload.get("enhancements"),
             transcript=payload.get("transcript"),
         )
-
-else:
-    def _render_video_thread(payload: dict):
-        render_pipeline(
-            face_image=payload["avatar_path"],
-            audio=payload["audio_path"],
-            reference_video=payload.get("driver_video"),
-            viseme_json=payload.get("viseme_json"),
-            quality_mode=payload.get("quality_mode", "auto"),
-            out_path=payload["out_path"],
-            enhancements=payload.get("enhancements"),
-            transcript=payload.get("transcript"),
-        )
-        # mark success for readiness
-        (WORK_ROOT / payload["job_id"] / "done").touch()
+        (job_dir / "done").touch()
+    except Exception as exc:  # surface failures via /status instead of silently hanging
+        log.exception("Render job %s failed", payload["job_id"])
+        (job_dir / "error").write_text(str(exc))
 
 
 # ───────────────────────────── REST endpoints ────────────────────────────── #
@@ -204,10 +198,10 @@ def render_job(body: RenderBody, bg: BackgroundTasks):
     }
 
     # save original request
-    (job_dir / "request.json").write_text(json.dumps(body.dict(by_alias=True), indent=2))
+    (job_dir / "request.json").write_text(json.dumps(body.model_dump(by_alias=True), indent=2))
 
     if celery_available:
-        task = _render_video_task.delay(payload)  # type: ignore
+        task = render_task.delay(payload)  # type: ignore[union-attr]
         (job_dir / "celery_id").write_text(task.id)
         async_mode = True
     else:
@@ -280,7 +274,7 @@ async def render_upload(
     )
 
     if celery_available:
-        task = _render_video_task.delay(payload)  # type: ignore
+        task = render_task.delay(payload)  # type: ignore[union-attr]
         (job_dir / "celery_id").write_text(task.id)
         async_mode = True
     else:
@@ -305,6 +299,11 @@ def get_status(job_id: str):
     if out_mp4.exists():
         return FileResponse(out_mp4, media_type="video/mp4")
 
+    # Surface a failed render rather than reporting "processing" forever.
+    error_marker = job_dir / "error"
+    if error_marker.exists():
+        return JSONResponse({"state": "error", "detail": error_marker.read_text()}, status_code=500)
+
     if celery_available:
         celery_id_path = job_dir / "celery_id"
         if not celery_id_path.exists():
@@ -312,10 +311,10 @@ def get_status(job_id: str):
         task_id = celery_id_path.read_text()
         task = AsyncResult(task_id, app=celery_app)
         return {"state": task.state}
-    else:
-        done_marker = job_dir / "done"
-        state = "finished" if done_marker.exists() else "processing"
-        return {"state": state}
+
+    done_marker = job_dir / "done"
+    state = "finished" if done_marker.exists() else "processing"
+    return {"state": state}
 
 
 # ─────────────────────── Text-to-Audio endpoint ────────────────────────────── #
