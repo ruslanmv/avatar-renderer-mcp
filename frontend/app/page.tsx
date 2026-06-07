@@ -75,6 +75,10 @@ export default function Page() {
   );
   const [selectedAvatar, setSelectedAvatar] = useState('professional');
   const [qualityMode, setQualityMode] = useState('auto');
+  // Audio source: 'tts' = synthesize from the script text, 'upload' = use the file.
+  const [audioSource, setAudioSource] = useState<'tts' | 'upload'>('tts');
+  const [voice, setVoice] = useState('en-US-AriaNeural');
+  const [speed, setSpeed] = useState(0);
   const [enabledEnhancements, setEnabledEnhancements] = useState<string[]>([
     'emotion_expressions',
     'eye_gaze_blink',
@@ -106,8 +110,17 @@ export default function Page() {
   const handleGenerate = async () => {
     if (isGenerating) return;
 
-    if (!avatarFile || !audioFile) {
-      alert('Please upload both an avatar image and audio file to generate');
+    if (!avatarFile) {
+      alert('Please upload an avatar image to generate');
+      return;
+    }
+    const useText = audioSource === 'tts';
+    if (useText && !script.trim()) {
+      alert('Please type some text to speak (or switch to Upload audio).');
+      return;
+    }
+    if (!useText && !audioFile) {
+      alert('Please upload an audio file (or switch to Text-to-speech).');
       return;
     }
 
@@ -135,13 +148,16 @@ export default function Page() {
     try {
       // Inference runs entirely on the Hugging Face Space (no GPU on Vercel).
       // Pass the user's HF token (if connected) so the run uses THEIR ZeroGPU quota.
-      const url = await generateAvatar(
-        avatarFile,
-        audioFile,
-        qualityMode,
-        getHfToken() ?? undefined,
-        enabledEnhancements,
-      );
+      const url = await generateAvatar({
+        image: avatarFile,
+        audio: useText ? null : audioFile,
+        text: useText ? script.trim() : '',
+        voice,
+        speed,
+        quality: qualityMode,
+        enhancements: enabledEnhancements,
+        hfToken: getHfToken() ?? undefined,
+      });
       clearInterval(stepInterval);
       setVideoUrl(url);
       setProgress(100);
@@ -415,6 +431,76 @@ export default function Page() {
                   <option value="real_time">Real-time</option>
                   <option value="high_quality">High quality</option>
                 </select>
+              </div>
+
+              {/* Audio source + Text-to-Speech settings */}
+              <div className="mb-6">
+                <label className="block text-sm text-gray-400 mb-3">Audio source</label>
+                <div className="flex gap-2 mb-3">
+                  {([['tts', 'Text-to-speech'], ['upload', 'Upload audio']] as const).map(([val, lbl]) => (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => setAudioSource(val)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                        audioSource === val
+                          ? 'border-cyan-500 bg-cyan-500/20 text-cyan-300'
+                          : 'border-gray-600 text-gray-500 hover:opacity-80'
+                      }`}
+                    >
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
+                {audioSource === 'tts' && (
+                  <div className="grid grid-cols-1 gap-3">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Voice</label>
+                      <select
+                        value={voice}
+                        onChange={(e) => setVoice(e.target.value)}
+                        className="w-full bg-black/40 border border-gray-600 rounded-lg px-3 py-2 text-sm text-cyan-50 outline-none focus:border-cyan-400"
+                      >
+                        {[
+                          ['en-US-AriaNeural', 'English (US) — Aria, female'],
+                          ['en-US-GuyNeural', 'English (US) — Guy, male'],
+                          ['en-GB-SoniaNeural', 'English (UK) — Sonia, female'],
+                          ['en-GB-RyanNeural', 'English (UK) — Ryan, male'],
+                          ['es-ES-ElviraNeural', 'Spanish (ES) — Elvira, female'],
+                          ['es-MX-JorgeNeural', 'Spanish (MX) — Jorge, male'],
+                          ['fr-FR-DeniseNeural', 'French — Denise, female'],
+                          ['de-DE-KatjaNeural', 'German — Katja, female'],
+                          ['it-IT-ElsaNeural', 'Italian — Elsa, female'],
+                          ['pt-BR-FranciscaNeural', 'Portuguese (BR) — Francisca, female'],
+                          ['hi-IN-SwaraNeural', 'Hindi — Swara, female'],
+                          ['zh-CN-XiaoxiaoNeural', 'Chinese — Xiaoxiao, female'],
+                          ['ja-JP-NanamiNeural', 'Japanese — Nanami, female'],
+                          ['ar-EG-SalmaNeural', 'Arabic — Salma, female'],
+                          ['ru-RU-SvetlanaNeural', 'Russian — Svetlana, female'],
+                        ].map(([id, label]) => (
+                          <option key={id} value={id}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Speed: {speed > 0 ? `+${speed}` : speed}%</label>
+                      <input
+                        type="range"
+                        min={-50}
+                        max={50}
+                        step={5}
+                        value={speed}
+                        onChange={(e) => setSpeed(parseInt(e.target.value, 10))}
+                        className="w-full accent-cyan-500"
+                      />
+                    </div>
+                    <p className="text-xs text-gray-500">
+                      The text in the script box above is spoken in the selected voice.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Enhancement Toggles */}

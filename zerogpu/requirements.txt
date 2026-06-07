@@ -4,6 +4,7 @@
 spaces
 torch
 pillow
+edge-tts
 numpy
 imageio-ffmpeg
 requests
