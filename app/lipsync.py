@@ -167,6 +167,17 @@ def wav2lip_render(*, face_image: str, audio: str, out_path: str) -> str:
     img_masked = face_resized.copy()
     img_masked[IMG_SIZE // 2:] = 0  # mask lower half (Wav2Lip convention)
 
+    # Wav2Lip reconstructs the whole 96x96 face crop, so upscaling it over the
+    # full (large) face box blurs the entire face. Instead, keep the ORIGINAL
+    # sharp face and feather-blend only the lower (mouth) region from the model.
+    bw, bh = x2 - x1, y2 - y1
+    blend_mask = np.zeros((bh, bw), np.float32)
+    blend_mask[int(bh * 0.52):, :] = 1.0
+    blend_mask = cv2.GaussianBlur(
+        blend_mask, (0, 0), sigmaX=max(1.0, bw * 0.04), sigmaY=max(1.0, bh * 0.04)
+    )[..., None]
+    orig_region = full[y1:y2, x1:x2].astype(np.float32)
+
     batch = 64
     written = 0
     # Wav2Lip channel order is [masked, reference] (lower half of the masked copy
@@ -182,9 +193,10 @@ def wav2lip_render(*, face_image: str, audio: str, out_path: str) -> str:
             pred = model(mel_t, img_t)
         pred = pred.cpu().numpy().transpose(0, 2, 3, 1) * 255.0
         for p in pred:
-            out_face = cv2.resize(p.astype(np.uint8), (x2 - x1, y2 - y1))
+            gen = cv2.resize(p.astype(np.uint8), (bw, bh)).astype(np.float32)
+            blended = orig_region * (1.0 - blend_mask) + gen * blend_mask
             frame = full.copy()
-            frame[y1:y2, x1:x2] = out_face
+            frame[y1:y2, x1:x2] = blended.astype(np.uint8)
             cv2.imwrite(str(frames_dir / f"{written:05d}.jpg"), frame)
             written += 1
 
