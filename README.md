@@ -84,70 +84,34 @@ The **Auto** mode (default) picks the right one for you.
 
 ---
 
-## Generation Methods — Quality Comparison
+## Generation Methods
 
-<!-- COMPARISON:START -->
-All variants generated from the **same portrait + same text** with the production `orchestrate()` pipeline. Samples hosted on the [comparison dataset](https://huggingface.co/datasets/ruslanmv/avatar-renderer-samples).
+Pick a lip-sync engine per request (or `auto`); strict tiers never silently downgrade.
 
-The Wav2Lip engine is the **faithful dev-v0.1.25 full-face pipeline**: the whole
-predicted face crop is pasted back each frame and restored with GFPGAN per-frame
-(no mouth-only blend) — the most natural mouth. The `wav2lip_band` column is the
-alternative anti-flicker compositing (mouth band on a static base).
-
-| `simple` | `wav2lip` | `wav2lip_gfpgan` ⭐ | `wav2lip_band` | `fullface` |
-|:---:|:---:|:---:|:---:|:---:|
-| ![simple](https://huggingface.co/datasets/ruslanmv/avatar-renderer-samples/resolve/main/simple.gif) | ![wav2lip](https://huggingface.co/datasets/ruslanmv/avatar-renderer-samples/resolve/main/wav2lip.gif) | ![wav2lip_gfpgan](https://huggingface.co/datasets/ruslanmv/avatar-renderer-samples/resolve/main/wav2lip_gfpgan.gif) | ![wav2lip_band](https://huggingface.co/datasets/ruslanmv/avatar-renderer-samples/resolve/main/wav2lip_band.gif) | ![fullface](https://huggingface.co/datasets/ruslanmv/avatar-renderer-samples/resolve/main/fullface.gif) |
-| No lip-sync (static) | Full-face, no restore | Full-face + GFPGAN | Mouth-band, static base | + head motion, static bg |
-| [mp4](https://huggingface.co/datasets/ruslanmv/avatar-renderer-samples/resolve/main/simple.mp4) | [mp4](https://huggingface.co/datasets/ruslanmv/avatar-renderer-samples/resolve/main/wav2lip.mp4) | [mp4](https://huggingface.co/datasets/ruslanmv/avatar-renderer-samples/resolve/main/wav2lip_gfpgan.mp4) | [mp4](https://huggingface.co/datasets/ruslanmv/avatar-renderer-samples/resolve/main/wav2lip_band.mp4) | [mp4](https://huggingface.co/datasets/ruslanmv/avatar-renderer-samples/resolve/main/fullface.mp4) |
-
-**Objective metrics** (measured on the rendered frames):
-
-| Method | Mouth sharpness ↑ | Lip motion ↑ | Face flicker ↓ | Background motion ↓ |
-|---|---:|---:|---:|---:|
-| `simple` | 38.3 | 0.001 | 0.001 | 0.0 |
-| `wav2lip` | 18.7 | 6.462 | 2.263 | 0.0 |
-| **`wav2lip_gfpgan`** ⭐ | 77.9 | 6.695 | 2.498 | 0.0 |
-| `wav2lip_band` | 71.2 | 6.458 | 0.992 | 0.0 |
-| `fullface` | 52.7 | 6.616 | 1.615 | 0.072 |
-<!-- COMPARISON:END -->
-
-> Regenerate this section on a GPU box: `scripts/regen_comparison.sh`
-> (renders every available engine, computes metrics, builds GIFs, uploads to the
-> dataset, and rewrites the block above). See the script header for options.
-
-**Verdict**
-- 🏆 **`wav2lip_gfpgan` — best overall (restored original):** faithful dev-v0.1.25 full-face pipeline — the most natural, sharp talking mouth (≈4× sharper than raw Wav2Lip), untouched background. The default for `standard`/`high_quality`.
-- **`wav2lip_band` — steadiest:** mouth-band blend on a GFPGAN'd static base, so the face flickers far less (≈1.0 vs ~2.5) at a small cost in mouth realism. Good for very still presenter shots.
-- **`fullface` — most lifelike motion:** adds subtle head motion + blink while keeping the **background static**; slightly softer due to the head warp. Used by `premium`.
-- `wav2lip` alone is too blurry (no restoration); `simple` has no lip-sync (preview only).
-
-> Trade-off: the full-face pipeline (`wav2lip_gfpgan`) GFPGANs every frame, so it
-> shows a little more frame-to-frame face variation than the static-base
-> `wav2lip_band` — that's the price of the more natural, original-quality mouth.
-> Naturalness ceiling: all methods animate the mouth (+ head, for `fullface`).
-> True 3D head-pose & expression (SadTalker/LivePortrait) is the recommended next
-> tier — see [`docs/NATURALNESS_DESIGN.md`](docs/NATURALNESS_DESIGN.md).
+- **In-process (ZeroGPU / CPU)** — run on the preview Space:
+  - `simple` — static portrait + audio (no lip-sync; preview only)
+  - `wav2lip_fast` — full-face Wav2Lip + per-frame GFPGAN (the faithful dev-v0.1.25 path); default for `standard`/`high_quality`
+  - `wav2lip_raw` — full-face Wav2Lip without restoration
+  - `wav2lip_band` — mouth-band blend on a GFPGAN'd static base (anti-flicker)
+  - `fullface` — adds subtle head motion + blink (static background)
+- **Premium pipeline (GPU build / Colab)** — diffusion / latent lip-sync:
+  `diff2lip`, `musetalk`, `latentsync`. Run them on a real GPU with the notebook below.
 
 ### Premium engines (MuseTalk · LatentSync · Diff2Lip) on a Colab GPU
-
-The premium engines can't run on the ZeroGPU Space (it only GPU-accelerates
-in-process code; these run as subprocesses needing their own repos + weights).
-Run them on a **real** Colab GPU instead:
 
 [![Open premium notebook In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ruslanmv/avatar-renderer-mcp/blob/main/demo_colab_premium.ipynb)
 &nbsp;`demo_colab_premium.ipynb`
 
-It installs MuseTalk/Diff2Lip/FOMM (+ optional LatentSync), then renders through the
-same `orchestrate()` engine selector used in production. **Free T4** runs
-MuseTalk + Diff2Lip + Wav2Lip; **LatentSync** needs an A100/L4 (Colab Pro).
+The premium engines can't run on the ZeroGPU Space (it only GPU-accelerates
+in-process code; these run as subprocesses needing their own repos + weights).
+The notebook installs MuseTalk/Diff2Lip/FOMM (+ optional LatentSync) and renders
+through the same `orchestrate()` engine selector used in production. **Free T4**
+runs MuseTalk + Diff2Lip + Wav2Lip; **LatentSync** needs an A100/L4 (Colab Pro).
 See [`COLAB_SETUP.md`](COLAB_SETUP.md).
 
 > **Status:** `diff2lip`/`musetalk` now run end-to-end on a Colab T4 (FOMM motion →
-> lip-sync → GFPGAN, no crashes). Their current output is still **static** — the
-> FOMM stage is audio-only (no driving video) and the lip-sync result isn't yet
-> composited into the final frames — so they're **not** in the comparison above
-> until the mouth motion lands. The Wav2Lip-family engines are the recommended,
-> verified lip-sync path today.
+> lip-sync → GFPGAN, no crashes); their mouth-motion compositing is still being
+> finished. The Wav2Lip-family engines are the recommended, verified path today.
 
 ---
 
