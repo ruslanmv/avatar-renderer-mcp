@@ -102,12 +102,18 @@ def synthesize_tts(text: str, voice: str, speed_pct: int, pitch_hz: int) -> str:
     return out
 
 
+# Lip-sync engine selector. The "pipeline" engines (MuseTalk/LatentSync/Diff2Lip/
+# Wav2Lip-pipeline) restore the dev-v0.1.25 high-quality path and require the full
+# GPU build (external repos + weights). The in-process engines run on this Space.
 METHOD_CHOICES = [
-    ("Best — mouth + GFPGAN (sharp)", "wav2lip_gfpgan"),
-    ("Full face — head motion, static background", "fullface"),
-    ("Basic lip-sync (no GFPGAN)", "wav2lip"),
-    ("Simple (no lip-sync)", "simple"),
-    ("Auto", "auto"),
+    ("Auto — best available model", "auto"),
+    ("MuseTalk — premium lip-sync (GPU build)", "musetalk"),
+    ("LatentSync — premium lip-sync (GPU build)", "latentsync"),
+    ("Diff2Lip — diffusion lip-sync (GPU build)", "diff2lip"),
+    ("Wav2Lip — pipeline + GFPGAN (GPU build)", "wav2lip_pipeline"),
+    ("Wav2Lip fast — in-process (this Space)", "wav2lip_gfpgan"),
+    ("Full-face — head motion, static bg", "fullface"),
+    ("Simple — no lip-sync", "simple"),
 ]
 
 
@@ -194,8 +200,9 @@ def build_ui() -> gr.Blocks:
                     info="Strict tiers (high_quality/premium/cinematic) never deliver a degraded fallback.",
                 )
                 method = gr.Dropdown(
-                    choices=METHOD_CHOICES, value="wav2lip_gfpgan", label="Generation method",
-                    info="Compare approaches: best mouth, full-face head motion, basic, or simple.",
+                    choices=METHOD_CHOICES, value="wav2lip_gfpgan", label="Lip-sync engine",
+                    info="Premium engines (MuseTalk/LatentSync/Diff2Lip) need the full GPU build; "
+                         "in-process engines run on this ZeroGPU Space.",
                 )
                 addons = gr.CheckboxGroup(
                     choices=ADDON_CHOICES,

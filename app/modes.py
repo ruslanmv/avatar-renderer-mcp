@@ -40,12 +40,12 @@ RENDER_CONFIGS = {
         fps=25, crf=23, resolution=720,
     ),
     "real_time": RenderConfig(
-        name="real_time", method="wav2lip", allow_fallback=True,
+        name="real_time", method="wav2lip_fast", allow_fallback=True,
         fps=25, crf=22, resolution=768,
         required_enhancements=["mouth_artifact_cleanup"],
     ),
     "standard": RenderConfig(
-        name="standard", method="wav2lip_gfpgan", allow_fallback=True,
+        name="standard", method="pipeline", allow_fallback=True,
         fps=25, crf=20, resolution=768,
         required_enhancements=["mouth_artifact_cleanup"],
         optional_enhancements=["eye_gaze_blink"],
@@ -56,21 +56,21 @@ RENDER_CONFIGS = {
     # the proper future gate). Strict tiers still enforce: no degraded fallback,
     # and a face must be present.
     "high_quality": RenderConfig(
-        name="high_quality", method="wav2lip_gfpgan", allow_fallback=False,
+        name="high_quality", method="pipeline", allow_fallback=False,
         fps=25, crf=18, resolution=768,
         required_enhancements=["mouth_artifact_cleanup"],
         optional_enhancements=["eye_gaze_blink"],
         max_artifact_score=None, require_face=True,
     ),
     "premium": RenderConfig(
-        name="premium", method="fullface", allow_fallback=False,
+        name="premium", method="pipeline", allow_fallback=False,
         fps=30, crf=16, resolution=1080,
         required_enhancements=["mouth_artifact_cleanup", "eye_gaze_blink"],
         optional_enhancements=["emotion_expressions"],
         max_artifact_score=None, require_face=True,
     ),
     "cinematic": RenderConfig(
-        name="cinematic", method="fullface", allow_fallback=False,
+        name="cinematic", method="pipeline", allow_fallback=False,
         fps=30, crf=16, resolution=1080,
         required_enhancements=["mouth_artifact_cleanup", "eye_gaze_blink"],
         max_artifact_score=None, require_face=True,

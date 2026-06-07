@@ -40,12 +40,32 @@ def _try_lipsync(face_image, audio, out_path, enhancements=None, use_gfpgan=None
     )
 
 
-# Named methods for the quality bake-off (selectable per request).
-#   simple        – no lip-sync (static portrait + Ken Burns)        [baseline]
-#   wav2lip       – mouth lip-sync, NO GFPGAN                         [blurry mouth]
-#   wav2lip_gfpgan– mouth lip-sync + GFPGAN (sharp), static bg/face   [best mouth]
-#   fullface      – wav2lip_gfpgan + whole-head motion (bg static) + blink
-_METHODS = {"simple", "wav2lip", "wav2lip_gfpgan", "fullface"}
+# Named methods. The "pipeline" methods restore the dev-v0.1.25 architecture
+# (FOMM → MuseTalk/LatentSync/Diff2Lip → Wav2Lip fallback → GFPGAN); they need
+# the external repos + model weights present (full GPU build). The "in-process"
+# methods (wav2lip*/fullface/simple) run on the lightweight ZeroGPU Space.
+_PIPELINE_METHODS = {"pipeline", "musetalk", "latentsync", "diff2lip", "wav2lip_pipeline"}
+_INPROC_METHODS = {"simple", "wav2lip", "wav2lip_gfpgan", "fullface"}
+_METHODS = _PIPELINE_METHODS | _INPROC_METHODS
+
+
+def _run_pipeline_method(method: str, *, face_image: str, audio: str, out_path: str) -> str:
+    """Route to the original high-quality render_pipeline with the chosen lip-sync."""
+    from .pipeline import render_pipeline  # heavy (torch) — lazy
+
+    kw = dict(face_image=face_image, audio=audio, out_path=out_path, quality_mode="high_quality")
+    if method == "musetalk":
+        kw["enhancements"] = ["musetalk_lipsync"]
+    elif method == "latentsync":
+        kw["enhancements"] = ["latentsync_lipsync"]
+    elif method == "wav2lip_pipeline":
+        kw["force_wav2lip"] = True
+    elif method in ("pipeline", "auto"):
+        # Try the best available lip-sync model in priority order; render_pipeline
+        # falls through MuseTalk → LatentSync → Diff2Lip → Wav2Lip internally.
+        kw["enhancements"] = ["musetalk_lipsync", "latentsync_lipsync"]
+    # "diff2lip": no lip_sync enhancement → render_pipeline's built-in Diff2Lip path
+    return render_pipeline(**kw)
 
 
 def render_method(method: str, *, face_image: str, audio: str, out_path: str, enhancements=None) -> str:
@@ -66,7 +86,71 @@ def render_method(method: str, *, face_image: str, audio: str, out_path: str, en
             face_image, audio, out_path,
             use_gfpgan=True, head_motion=True, enhancements=enh,
         )
+    if method in _PIPELINE_METHODS:
+        return _run_pipeline_method(method, face_image=face_image, audio=audio, out_path=out_path)
     raise ValueError(f"Unknown method: {method}")
+
+
+# ── Flexible engine catalog (compose a workflow) ─────────────────────────────
+# Each engine maps to how it plugs into render_pipeline. Engines need their repo
+# + weights present (full GPU build); on the lightweight Space they fall back.
+LIPSYNC_ENGINES = {
+    "auto": {"enh": ["musetalk_lipsync", "latentsync_lipsync"]},  # best available
+    "musetalk": {"enh": ["musetalk_lipsync"]},
+    "latentsync": {"enh": ["latentsync_lipsync"]},
+    "diff2lip": {},                       # render_pipeline's built-in Diff2Lip
+    "wav2lip": {"force_wav2lip": True},   # subprocess Wav2Lip (dev-v0.1.25 fallback)
+    "wav2lip_fast": {"inproc": True},     # in-process Wav2Lip+GFPGAN (ZeroGPU)
+}
+MOTION_ENGINES = {
+    "fomm": [],                           # render_pipeline default motion
+    "liveportrait": ["liveportrait_driver"],
+    "hallo3": ["hallo3_cinematic"],
+    "gaussian": ["gaussian_splatting"],
+    # "sadtalker": not yet wired as an enhancement (repo present; TODO)
+}
+EXTRA_ENGINES = {
+    "gfpgan": [],                         # auto-applied if checkpoint present
+    "cosyvoice": ["cosyvoice_tts"],
+    "emotion": ["emotion_expressions"],
+    "eye_gaze": ["eye_gaze_blink"],
+    "gesture": ["gesture_animation"],
+    "viseme": ["viseme_guided"],
+    "mouth_cleanup": ["mouth_artifact_cleanup"],
+}
+
+
+def render_workflow(
+    *, face_image: str, audio: str, out_path: str,
+    lip_sync: str = "auto", motion_driver: str = "fomm",
+    extras: Optional[List[str]] = None, transcript: Optional[str] = None,
+) -> str:
+    """Compose a render workflow from chosen engines and run it.
+
+    lip_sync: auto|musetalk|latentsync|diff2lip|wav2lip|wav2lip_fast
+    motion_driver: fomm|liveportrait|hallo3|gaussian
+    extras: any of EXTRA_ENGINES keys (gfpgan/cosyvoice/emotion/eye_gaze/gesture/...)
+    """
+    extras = extras or []
+    spec = LIPSYNC_ENGINES.get(lip_sync, LIPSYNC_ENGINES["auto"])
+
+    # In-process fast path (works on the ZeroGPU Space, no external repos).
+    if spec.get("inproc"):
+        enh = [EXTRA_ENGINES[e][0] for e in extras if EXTRA_ENGINES.get(e)]
+        return _try_lipsync(face_image, audio, out_path, use_gfpgan=True, enhancements=enh or None)
+
+    # Full pipeline path (dev-v0.1.25): motion driver + lip-sync + extras.
+    enh = list(MOTION_ENGINES.get(motion_driver, []))
+    enh += spec.get("enh", [])
+    for e in extras:
+        enh += EXTRA_ENGINES.get(e, [])
+    from .pipeline import render_pipeline  # heavy (torch) — lazy
+
+    return render_pipeline(
+        face_image=face_image, audio=audio, out_path=out_path,
+        quality_mode="high_quality", force_wav2lip=spec.get("force_wav2lip", False),
+        enhancements=list(dict.fromkeys(enh)) or None, transcript=transcript,
+    )
 
 
 def _try_pipeline(**kwargs) -> str:
@@ -128,10 +212,21 @@ def render(
             raise RuntimeError(
                 f"'{quality_mode}' render failed and fallback is disabled: {exc}"
             ) from exc
-        log.warning("Method '%s' failed (%s); using ffmpeg fallback.", chosen, exc)
+        # Soft fallback chain: best models → in-process Wav2Lip+GFPGAN → ffmpeg.
+        log.warning("Method '%s' failed (%s); trying fallbacks.", chosen, exc)
         provenance["fallback_used"] = True
-        provenance["method"] = "simple"
-        out = simple_render(face_image=face_image, audio=audio, out_path=out_path)
+        for fb in ("wav2lip_gfpgan", "simple"):
+            if fb == chosen:
+                continue
+            try:
+                out = render_method(fb, face_image=face_image, audio=audio, out_path=out_path, enhancements=eff_enh)
+                provenance["method"] = fb
+                break
+            except Exception as fexc:
+                log.warning("Fallback '%s' failed: %s", fb, fexc)
+        if out is None:
+            out = simple_render(face_image=face_image, audio=audio, out_path=out_path)
+            provenance["method"] = "simple"
 
     # Quality report + premium gate (best-effort; never breaks non-strict).
     try:
