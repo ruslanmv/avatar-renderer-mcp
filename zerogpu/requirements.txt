@@ -1,9 +1,9 @@
-# ZeroGPU Gradio Space requirements.
-# Kept lean so the Space builds reliably. The guaranteed render path (ffmpeg)
-# needs no ML deps; torch is present so the @spaces.GPU function runs real GPU
-# code once an in-process model is wired in.
+# ZeroGPU Gradio Space requirements (pinned to a known-good combo).
+# gradio 4.44.x imports HfFolder from huggingface_hub, which newer hub releases
+# removed — so huggingface_hub is pinned to the 0.25.x line. Keep these in sync.
 gradio==4.44.1
-spaces
+huggingface_hub==0.25.2
+spaces==0.30.4
 torch
 pillow
 numpy
@@ -11,4 +11,3 @@ imageio-ffmpeg
 requests
 pydantic>=2,<3
 pydantic-settings>=2,<3
-huggingface_hub
