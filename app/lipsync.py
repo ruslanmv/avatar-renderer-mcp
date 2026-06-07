@@ -176,6 +176,31 @@ def wav2lip_render(*, face_image: str, audio: str, out_path: str) -> str:
         check=True,
     )
     wav = w2l_audio.load_wav(str(wav_path), 16000)
+
+    # Trim leading/trailing silence so the mouth doesn't keep moving after the
+    # speech ends. The SAME trimmed span is used for the final audio mux, so
+    # video and audio start/end together.
+    import librosa
+
+    audio_for_mux = audio
+    try:
+        _, idx = librosa.effects.trim(wav, top_db=30)
+        s0, s1 = int(idx[0]), int(idx[1])
+        if s1 - s0 > 16000 * 0.2:  # keep only if >0.2s of speech remains
+            wav = wav[s0:s1]
+            start_sec = s0 / 16000.0
+            dur_sec = (s1 - s0) / 16000.0
+            trimmed = tmp / "trimmed_audio.wav"
+            subprocess.run(
+                ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{start_sec:.3f}",
+                 "-t", f"{dur_sec:.3f}", "-i", audio, str(trimmed)],
+                check=True,
+            )
+            audio_for_mux = str(trimmed)
+            log.info("Trimmed silence: %.2fs..%.2fs (%.2fs of speech)", start_sec, s1 / 16000.0, dur_sec)
+    except Exception as exc:
+        log.warning("Silence trim skipped: %s", exc)
+
     mel = w2l_audio.melspectrogram(wav)
     if np.isnan(mel.reshape(-1)).sum() > 0:
         raise RuntimeError("Mel contains NaN; check audio.")
@@ -249,7 +274,7 @@ def wav2lip_render(*, face_image: str, audio: str, out_path: str) -> str:
         [
             "ffmpeg", "-y", "-loglevel", "error",
             "-framerate", str(FPS), "-i", str(frames_dir / "%05d.jpg"),
-            "-i", audio,
+            "-i", audio_for_mux,
             "-map", "0:v:0", "-map", "1:a:0",
             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20",
             "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart",
