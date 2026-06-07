@@ -84,6 +84,38 @@ The **Auto** mode (default) picks the right one for you.
 
 ---
 
+## Generation Methods — Quality Comparison
+
+All four methods generated from the **same portrait + same text** on the live
+[ZeroGPU Space](https://huggingface.co/spaces/ruslanmv/avatar-renderer). Samples
+hosted on the [comparison dataset](https://huggingface.co/datasets/ruslanmv/avatar-renderer-samples).
+
+| `simple` | `wav2lip` | `wav2lip_gfpgan` ⭐ | `fullface` |
+|:---:|:---:|:---:|:---:|
+| ![simple](https://huggingface.co/datasets/ruslanmv/avatar-renderer-samples/resolve/main/simple.gif) | ![wav2lip](https://huggingface.co/datasets/ruslanmv/avatar-renderer-samples/resolve/main/wav2lip.gif) | ![wav2lip_gfpgan](https://huggingface.co/datasets/ruslanmv/avatar-renderer-samples/resolve/main/wav2lip_gfpgan.gif) | ![fullface](https://huggingface.co/datasets/ruslanmv/avatar-renderer-samples/resolve/main/fullface.gif) |
+| No lip-sync (static) | Lip-sync, no restore | Lip-sync + GFPGAN | + head motion, static bg |
+| [mp4](https://huggingface.co/datasets/ruslanmv/avatar-renderer-samples/resolve/main/simple.mp4) | [mp4](https://huggingface.co/datasets/ruslanmv/avatar-renderer-samples/resolve/main/wav2lip.mp4) | [mp4](https://huggingface.co/datasets/ruslanmv/avatar-renderer-samples/resolve/main/wav2lip_gfpgan.mp4) | [mp4](https://huggingface.co/datasets/ruslanmv/avatar-renderer-samples/resolve/main/fullface.mp4) |
+
+**Objective metrics** (measured on the rendered frames):
+
+| Method | Mouth sharpness ↑ | Lip motion ↑ | Face flicker ↓ | Background motion ↓ |
+|---|---:|---:|---:|---:|
+| `simple` | 85.2 | 0.0 (no talk) | 0.00 | 0.00 |
+| `wav2lip` | 15.2 (blurry) | 5.9 | 0.11 | 0.00 |
+| **`wav2lip_gfpgan`** ⭐ | **73.7** | 5.9 | 0.12 | 0.00 |
+| `fullface` | 54.0 | 6.0 | 0.86 (head motion) | 0.08 |
+
+**Verdict**
+- 🏆 **`wav2lip_gfpgan` — best overall:** sharp talking mouth (≈5× sharper than raw Wav2Lip), stable face, untouched background. The default for `standard`/`high_quality`.
+- **`fullface` — most lifelike:** adds subtle head motion + blink while keeping the **background static**; slightly softer due to the head warp. Used by `premium`.
+- `wav2lip` alone is too blurry (no restoration); `simple` has no lip-sync (preview only).
+
+> Naturalness ceiling: all methods animate the mouth (+ head, for `fullface`).
+> True 3D head-pose & expression (SadTalker/LivePortrait) is the recommended next
+> tier — see [`docs/NATURALNESS_DESIGN.md`](docs/NATURALNESS_DESIGN.md).
+
+---
+
 ## 10 Enhancement Modules
 
 <img src="docs/enhancements-banner.svg" alt="Enhancement Modules" width="800"/>
