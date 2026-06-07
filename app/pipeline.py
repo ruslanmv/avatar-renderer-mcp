@@ -774,8 +774,24 @@ def render_pipeline(
                 lip_result = run_wav2lip(fomm_frames, audio, tmp)
 
     final_result: Path = lip_result
+
+    # Mouth-artifact cleanup BEFORE face restoration, so GFPGAN does not sharpen a
+    # "mouth-within-a-mouth" remnant (the lip-sync must own the mouth interior).
+    try:
+        if final_result.is_dir():
+            import cv2
+            from .enhancements.mouth_artifact_cleanup import cleanup_frame
+
+            for fp in sorted(glob.glob(str(final_result / "*.png"))):
+                img = cv2.imread(fp)
+                if img is not None:
+                    cv2.imwrite(fp, cleanup_frame(img))
+            log.info("Applied mouth-artifact cleanup before GFPGAN")
+    except Exception as e:
+        log.warning("Mouth cleanup skipped: %s", e)
+
     if GFPGAN_CKPT.exists():
-        final_result = enhance_with_gfpgan(lip_result, tmp)
+        final_result = enhance_with_gfpgan(final_result, tmp)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Post-processing enhancements (eye gaze, viseme, gestures — additive)

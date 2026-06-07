@@ -114,7 +114,12 @@ def _detect_face_box(img, pad: float = 0.25):
         return 0, 0, w, h
     x, y, fw, fh = max(faces, key=lambda b: b[2] * b[3])
     px, py = int(fw * pad), int(fh * pad)
-    return max(0, x - px), max(0, y - py), min(w, x + fw + px), min(h, y + fh + py)
+    # Cast to plain python ints — numpy ints break cv2 geometry calls
+    # (cv2.ellipse / getRotationMatrix2D raise "Can't parse 'center'").
+    return (
+        int(max(0, x - px)), int(max(0, y - py)),
+        int(min(w, x + fw + px)), int(min(h, y + fh + py)),
+    )
 
 
 def _get_gfpgan(device: str):
@@ -294,7 +299,7 @@ def wav2lip_render(
     head_mask = None
     if head_motion:
         hm = np.zeros(full.shape[:2], np.float32)
-        cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+        cx, cy = int((x1 + x2) // 2), int((y1 + y2) // 2)
         cv2.ellipse(hm, (cx, cy), (int(bw * 0.90), int(bh * 1.10)), 0, 0, 360, 1.0, -1)
         head_mask = cv2.GaussianBlur(hm, (0, 0), sigmaX=bw * 0.07, sigmaY=bh * 0.07)[..., None]
 
@@ -349,7 +354,7 @@ def wav2lip_render(
                 dy = 2.0 * math.sin(2 * math.pi * 0.18 * t + 1.0)
                 ang = 0.8 * math.sin(2 * math.pi * 0.20 * t)
                 sc = 1.0 + 0.006 * math.sin(2 * math.pi * 0.15 * t)
-                cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+                cx, cy = float((x1 + x2) // 2), float((y1 + y2) // 2)
                 M = cv2.getRotationMatrix2D((cx, cy), ang, sc)
                 M[0, 2] += dx
                 M[1, 2] += dy

@@ -472,9 +472,14 @@ async def render_upload(
     job_dir = WORK_ROOT / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save uploaded files
-    avatar_path = job_dir / f"avatar_{avatar.filename}"
-    audio_path = job_dir / f"audio_{audio.filename}"
+    # Save uploaded files under FIXED safe names — never trust the client filename
+    # (path traversal / odd characters). Preserve only a sanitized extension.
+    def _safe_ext(name: str, default: str) -> str:
+        ext = Path(name or "").suffix.lower()
+        return ext if ext and len(ext) <= 6 and ext.isascii() else default
+
+    avatar_path = job_dir / f"avatar{_safe_ext(avatar.filename, '.png')}"
+    audio_path = job_dir / f"audio{_safe_ext(audio.filename, '.wav')}"
     out_mp4 = job_dir / "out.mp4"
 
     with avatar_path.open("wb") as f:

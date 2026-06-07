@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import List, Optional
 
 log = logging.getLogger("avatar-renderer.render")
@@ -47,21 +48,23 @@ def _try_lipsync(face_image, audio, out_path, enhancements=None, use_gfpgan=None
 _METHODS = {"simple", "wav2lip", "wav2lip_gfpgan", "fullface"}
 
 
-def render_method(method: str, *, face_image: str, audio: str, out_path: str) -> str:
+def render_method(method: str, *, face_image: str, audio: str, out_path: str, enhancements=None) -> str:
     """Render with an explicitly chosen method (used for the comparison/bake-off)."""
     method = (method or "").strip().lower()
     from .simple_render import simple_render
 
+    enh = list(dict.fromkeys(enhancements or []))  # de-dup, preserve order
     if method == "simple":
         return simple_render(face_image=face_image, audio=audio, out_path=out_path)
     if method == "wav2lip":
-        return _try_lipsync(face_image, audio, out_path, use_gfpgan=False)
+        return _try_lipsync(face_image, audio, out_path, use_gfpgan=False, enhancements=enh or None)
     if method == "wav2lip_gfpgan":
-        return _try_lipsync(face_image, audio, out_path, use_gfpgan=True)
+        return _try_lipsync(face_image, audio, out_path, use_gfpgan=True, enhancements=enh or None)
     if method == "fullface":
+        enh = list(dict.fromkeys(enh + ["eye_gaze_blink"]))
         return _try_lipsync(
             face_image, audio, out_path,
-            use_gfpgan=True, head_motion=True, enhancements=["eye_gaze_blink"],
+            use_gfpgan=True, head_motion=True, enhancements=enh,
         )
     raise ValueError(f"Unknown method: {method}")
 
@@ -84,56 +87,64 @@ def render(
     transcript: Optional[str] = None,
     method: Optional[str] = None,
 ) -> str:
-    """Render an avatar video, returning the output path.
+    """Render an avatar video (tier-driven, with a strict production contract).
 
-    Order by RENDER_BACKEND:
-      simple → ffmpeg only.
-      lipsync → Wav2Lip (talking face) then ffmpeg fallback.
-      full → FOMM/Diff2Lip pipeline then ffmpeg fallback.
-      auto (default) → Wav2Lip → full pipeline → ffmpeg, whichever works first.
+    The quality_mode resolves to a RenderConfig (app.modes). An explicit `method`
+    overrides the tier's method (used by the bake-off / UI method selector).
+
+    Production rule: strict tiers (high_quality/premium/cinematic) NEVER deliver a
+    degraded ffmpeg fallback — they raise instead, and a quality_report.json is
+    written next to the output (premium delivery is gated on it).
     """
+    from .modes import get_render_config, is_strict
     from .simple_render import simple_render
 
-    # Explicit method (bake-off / UI selection) takes precedence.
-    if method and method.strip().lower() in _METHODS and method.strip().lower() != "auto":
-        try:
-            return render_method(method, face_image=face_image, audio=audio, out_path=out_path)
-        except Exception as exc:
-            log.warning("Method '%s' failed (%s); falling back to ffmpeg renderer.", method, exc)
-            return simple_render(face_image=face_image, audio=audio, out_path=out_path)
+    config = get_render_config(quality_mode)
+    strict = is_strict(quality_mode)
 
-    backend = _backend()
+    # Choose method: explicit method param wins, else the tier's method.
+    chosen = (method or "").strip().lower()
+    if not chosen or chosen == "auto" or chosen not in _METHODS:
+        chosen = config.method
 
-    if backend == "simple":
-        return simple_render(face_image=face_image, audio=audio, out_path=out_path)
+    # Merge enhancements: tier-required + caller-requested (de-duped).
+    eff_enh = list(dict.fromkeys(list(config.required_enhancements) + list(enhancements or [])))
 
-    # Build the attempt order.
-    attempts = []
-    if backend in ("auto", "lipsync"):
-        attempts.append(("wav2lip", lambda: _try_lipsync(face_image, audio, out_path, enhancements)))
-    if backend in ("auto", "full"):
-        attempts.append(
-            (
-                "pipeline",
-                lambda: _try_pipeline(
-                    face_image=face_image,
-                    audio=audio,
-                    out_path=out_path,
-                    reference_video=reference_video,
-                    viseme_json=viseme_json,
-                    quality_mode=quality_mode,
-                    enhancements=enhancements,
-                    transcript=transcript,
-                ),
-            )
-        )
+    provenance = {
+        "quality_mode": (quality_mode or "standard"),
+        "method": chosen,
+        "strict": strict,
+        "fallback_used": False,
+        "enhancements": eff_enh,
+    }
 
-    for name, fn in attempts:
-        try:
-            log.info("Rendering with '%s' backend...", name)
-            return fn()
-        except Exception as exc:
-            log.warning("'%s' renderer failed: %s", name, exc)
+    out: Optional[str] = None
+    try:
+        log.info("Rendering: mode=%s method=%s strict=%s", quality_mode, chosen, strict)
+        out = render_method(chosen, face_image=face_image, audio=audio, out_path=out_path, enhancements=eff_enh)
+    except Exception as exc:
+        if strict or not config.allow_fallback:
+            # Never deliver a degraded result for a strict tier.
+            raise RuntimeError(
+                f"'{quality_mode}' render failed and fallback is disabled: {exc}"
+            ) from exc
+        log.warning("Method '%s' failed (%s); using ffmpeg fallback.", chosen, exc)
+        provenance["fallback_used"] = True
+        provenance["method"] = "simple"
+        out = simple_render(face_image=face_image, audio=audio, out_path=out_path)
 
-    log.warning("All model renderers unavailable; using the ffmpeg demo renderer.")
-    return simple_render(face_image=face_image, audio=audio, out_path=out_path)
+    # Quality report + premium gate (best-effort; never breaks non-strict).
+    try:
+        from .quality import compute_quality_report, write_quality_report
+
+        report = compute_quality_report(out, config=config, provenance=provenance)
+        write_quality_report(str(Path(out).parent), report)
+        log.info("Quality report: passed=%s metrics=%s", report.get("passed"), report.get("metrics"))
+        if strict and not report.get("passed", True):
+            raise RuntimeError(f"'{quality_mode}' quality gate failed: {report.get('failures')}")
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        log.warning("Quality report skipped: %s", exc)
+
+    return out

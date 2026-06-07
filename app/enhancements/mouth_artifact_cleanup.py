@@ -126,6 +126,12 @@ class MouthArtifactCleanupEnhancement(Enhancement):
     def apply(self, ctx: EnhancementContext) -> EnhancementContext:
         import cv2
 
+        # Support MP4 outputs (LatentSync/Diff2Lip) — extract frames first so the
+        # cleanup runs even when the lip-sync stage produced a video, not frames.
+        if (ctx.frames_dir is None or not ctx.frames_dir.exists()) and \
+                ctx.video_path and Path(ctx.video_path).exists():
+            ctx.frames_dir = self._extract_frames(ctx)
+
         if ctx.frames_dir is None or not ctx.frames_dir.exists():
             return ctx
         frame_files = sorted(glob.glob(str(ctx.frames_dir / "*.png")))
@@ -143,6 +149,17 @@ class MouthArtifactCleanupEnhancement(Enhancement):
         ctx.frames_dir = out_dir
         ctx.video_path = None
         return ctx
+
+    def _extract_frames(self, ctx: EnhancementContext):
+        import subprocess
+
+        frames_dir = ctx.tmp_dir / "mouth_cleanup_extracted"
+        frames_dir.mkdir(parents=True, exist_ok=True)
+        subprocess.check_call([
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-i", str(ctx.video_path), str(frames_dir / "%04d.png"),
+        ])
+        return frames_dir
 
 
 registry.register(MouthArtifactCleanupEnhancement())

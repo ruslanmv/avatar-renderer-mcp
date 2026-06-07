@@ -112,8 +112,8 @@ METHOD_CHOICES = [
 
 
 @gpu
-def _gpu_render(image_path: str, audio_path: str, addons, method) -> str:
-    """GPU-allocated render (Wav2Lip + GFPGAN + add-ons / chosen method)."""
+def _gpu_render(image_path: str, audio_path: str, addons, method, quality_mode) -> str:
+    """GPU-allocated render (Wav2Lip + GFPGAN + add-ons / chosen method/tier)."""
     out_path = str(_OUT_DIR / f"{uuid.uuid4()}.mp4")
     return render(
         face_image=image_path,
@@ -121,6 +121,7 @@ def _gpu_render(image_path: str, audio_path: str, addons, method) -> str:
         out_path=out_path,
         enhancements=(addons or None),
         method=(method or "auto"),
+        quality_mode=(quality_mode or "standard"),
     )
 
 
@@ -147,7 +148,7 @@ def generate(image_path, audio_path, text, voice, speed, pitch, quality_mode, ad
     addons = [label_to_id.get(a, a) for a in (addons or [])]
 
     try:
-        return _gpu_render(image_path, audio_path, addons, method or "auto")
+        return _gpu_render(image_path, audio_path, addons, method or "auto", quality_mode or "standard")
     except Exception as exc:
         raise gr.Error(f"Rendering failed: {exc}") from exc
 
