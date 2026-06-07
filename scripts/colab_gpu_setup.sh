@@ -29,6 +29,11 @@ clone() {  # name url dir
         echo "   [DL] $1"; git clone --depth 1 "$2" "$3" 2>&1 | tail -2 || echo "   [SKIP] $1"; fi
 }
 
+# Pipeline glue deps imported in-process by the FOMM/Diff2Lip stages. Kept small
+# and version-free so they don't disturb Colab's CUDA torch.
+echo "== Installing pipeline runtime deps =="
+pip install -q ffmpeg-python scikit-image pyyaml blobfile omegaconf einops 2>&1 | tail -3 || true
+
 # FOMM is the motion stage every pipeline engine needs.
 clone "First Order Motion Model" "https://github.com/AliaksandrSiarohin/first-order-model.git" "$EXT_DEPS_DIR/first-order-model"
 clone "Wav2Lip"          "https://github.com/Rudrabha/Wav2Lip.git"             "$EXT_DEPS_DIR/Wav2Lip"
