@@ -187,10 +187,12 @@ def compute_quality_report(video_path: str, *, config=None, provenance: Optional
             report["failures"].append(
                 f"mouth_artifact_score {score} > {config.max_artifact_score}"
             )
-        if getattr(config, "require_face", False) and report["metrics"]["face_visible_ratio"] < 0.8:
+        # Haar detection misses many valid frames, so use a lenient floor here
+        # (just guard against "no face at all" rather than per-frame jitter).
+        if getattr(config, "require_face", False) and report["metrics"]["face_visible_ratio"] < 0.4:
             report["passed"] = False
             report["failures"].append(
-                f"face_visible_ratio {report['metrics']['face_visible_ratio']} < 0.8"
+                f"face_visible_ratio {report['metrics']['face_visible_ratio']} < 0.4"
             )
     return report
 
