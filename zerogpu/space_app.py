@@ -26,18 +26,6 @@ from pathlib import Path
 
 import gradio as gr
 
-# ZeroGPU runtime provides `spaces`; locally we fall back to a no-op decorator.
-try:
-    import spaces  # type: ignore
-except Exception:  # pragma: no cover - only hit off-ZeroGPU
-    class _SpacesShim:
-        @staticmethod
-        def GPU(*args, **kwargs):
-            def _wrap(fn):
-                return fn
-            return _wrap(args[0]) if args and callable(args[0]) else _wrap
-    spaces = _SpacesShim()  # type: ignore
-
 from app.render import render  # lazy/heavy imports happen inside render()
 
 _OUT_DIR = Path(tempfile.gettempdir()) / "zerogpu-jobs"
@@ -45,8 +33,21 @@ _OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 GPU_DURATION = int(os.getenv("ZEROGPU_DURATION", "120"))
 
+# Use the real ZeroGPU decorator only on actual ZeroGPU hardware (env set by HF).
+# On cpu-basic (e.g. while waiting for a ZeroGPU slot) it is a no-op, so the app
+# still runs and serves the ffmpeg fallback instead of crashing.
+_ON_ZEROGPU = os.environ.get("SPACES_ZERO_GPU", "").lower() in ("true", "1")
+if _ON_ZEROGPU:
+    import spaces  # provided by the ZeroGPU runtime
 
-@spaces.GPU(duration=GPU_DURATION)
+    def gpu(fn):
+        return spaces.GPU(duration=GPU_DURATION)(fn)
+else:
+    def gpu(fn):
+        return fn
+
+
+@gpu
 def generate(image_path: str, audio_path: str, quality_mode: str = "auto") -> str:
     """Generate a talking-avatar video on GPU and return the output file path.
 

@@ -5,6 +5,7 @@ colorFrom: purple
 colorTo: blue
 sdk: gradio
 sdk_version: 4.44.1
+python_version: "3.11"
 app_file: space_app.py
 pinned: true
 license: apache-2.0
