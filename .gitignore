@@ -261,3 +261,7 @@ launcher/web/cache/preview_audio.wav
 *.sqlite3
 *.sqlite3-wal
 *.sqlite3-shm
+
+# Demo assets that SHOULD be committed (override the *.mp4 rule above)
+!frontend/public/demo.mp4
+!hf/static/demo.mp4

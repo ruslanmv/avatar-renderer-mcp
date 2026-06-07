@@ -296,23 +296,17 @@ export default function Page() {
           <div className="fade-in mb-12">
             <div className="relative max-w-4xl mx-auto">
               <div className="relative rounded-2xl overflow-hidden shadow-[0_0_50px_rgba(0,150,255,0.3)]">
-                <div className="aspect-video bg-gradient-to-br from-gray-900 to-black flex items-center justify-center">
-                  <div className="text-center">
-                    <div className="flex justify-center items-center gap-1 h-10 mb-4">
-                      {[...Array(7)].map((_, i) => (
-                        <div
-                          key={i}
-                          className="w-1 bg-gradient-to-t from-cyan-400 to-blue-400 rounded-sm"
-                          style={{
-                            animation: `waveform 1.5s ease-in-out infinite`,
-                            animationDelay: `${i * 0.1}s`,
-                          }}
-                        />
-                      ))}
-                    </div>
-                    <p className="text-gray-400">AI Avatar Demo Video</p>
-                  </div>
-                </div>
+                <video
+                  className="aspect-video w-full object-cover bg-black"
+                  src="/demo.mp4"
+                  poster="/demo-poster.jpg"
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  controls
+                  preload="metadata"
+                />
                 <div className="absolute inset-0 border border-cyan-500/30 rounded-2xl pointer-events-none"></div>
               </div>
 
