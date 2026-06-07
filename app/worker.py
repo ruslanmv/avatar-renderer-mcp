@@ -26,7 +26,7 @@ from typing import Any, Dict
 
 from celery import Celery, signals
 
-from .pipeline import render_pipeline
+from .render import render as run_render
 from .settings import Settings
 
 logger = logging.getLogger("avatar-renderer.worker")
@@ -91,7 +91,7 @@ def render_task(payload: Dict[str, Any]) -> Dict[str, Any]:
     if viseme_json is None and transcript:
         viseme_json = _maybe_build_visemes(payload["audio_path"], transcript)
 
-    render_pipeline(
+    run_render(
         face_image=payload["avatar_path"],
         audio=payload["audio_path"],
         reference_video=payload.get("driver_video"),
