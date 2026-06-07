@@ -39,7 +39,16 @@ mkdir -p "$OUT_DIR"
 
 jqpy() { python3 -c "import sys,json;d=json.load(sys.stdin);print(d$1)" 2>/dev/null || true; }
 
-# ── 0) Make the Colab checkout current, so all engines/render_one exist ───────
+# ── 0) Preflight: the tunnel + server must be reachable and return JSON ───────
+ping="$(curl -sS --max-time 20 "$COLAB_GPU_URL/ping" 2>/dev/null || true)"
+if ! printf '%s' "$ping" | grep -q avatar-renderer-colab-gpu; then
+    echo "ERROR: Colab server not reachable at $COLAB_GPU_URL"
+    echo "  The Cloudflare tunnel likely dropped (Error 1033) or the runtime disconnected."
+    echo "  Re-run the notebook's tunnel cell, then re-export COLAB_GPU_URL/COLAB_GPU_TOKEN."
+    exit 2
+fi
+
+# ── 1) Make the Colab checkout current, so all engines/render_one exist ───────
 if [ "$PULL" = "1" ]; then
     echo "[colab] git pull $BRANCH"
     jid="$($CLIENT POST /git/pull "{\"branch\":\"$BRANCH\"}" | jqpy "['job_id']")"
@@ -48,6 +57,9 @@ fi
 
 echo "[colab] /health"; $CLIENT GET /health; echo
 AVAIL_JSON="$($CLIENT GET /engines)"
+if ! printf '%s' "$AVAIL_JSON" | python3 -c 'import sys,json;json.load(sys.stdin)' 2>/dev/null; then
+    echo "ERROR: /engines did not return JSON (tunnel/runtime issue). Aborting."; exit 2
+fi
 echo "[colab] available engines: $(printf '%s' "$AVAIL_JSON" | jqpy "['available']")"
 
 # ── 1) Variant manifest: "label|engine|quality|star|caption" (same as local) ──
