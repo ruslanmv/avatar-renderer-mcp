@@ -137,7 +137,7 @@ def auth_client(tmp_path, monkeypatch):
         Path(out_path).write_bytes(b"\x00" * 1024)
         return str(out_path)
 
-    monkeypatch.setattr(api_module, "render_pipeline", _fake_pipeline)
+    monkeypatch.setattr(api_module, "run_render", _fake_pipeline)
     return TestClient(api_module.app), db
 
 

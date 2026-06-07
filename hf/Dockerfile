@@ -63,12 +63,17 @@ RUN mkdir -p /app/models/fomm /app/models/wav2lip /app/models/diff2lip \
              /app/models/gfpgan /app/models/sadtalker
 
 # -- Environment defaults for HF Spaces --------------------------------------
+# RENDER_BACKEND=simple → dependency-light ffmpeg renderer (no torch/models/GPU).
+# The Space generates real MP4s on free CPU hardware with ZERO required secrets.
+# To enable the full lip-sync pipeline, run on GPU hardware and set
+# RENDER_BACKEND=auto (the start script will then fetch models).
 ENV MODEL_ROOT=/app/models \
     EXT_DEPS_DIR=/app/external_deps \
     PYTHONPATH="/app" \
     PORT=7860 \
     HOST=0.0.0.0 \
     LOG_LEVEL=INFO \
+    RENDER_BACKEND=simple \
     HF_HUB_DISABLE_TELEMETRY=1 \
     DO_NOT_TRACK=1
 

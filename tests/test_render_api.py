@@ -43,8 +43,8 @@ def _patch_pipeline(monkeypatch):
         Path(out_path).write_bytes(TMP_OUT.read_bytes())
         return str(out_path)  # Return the output path like the real function
 
-    # Patch the render_pipeline as imported in api.py
-    monkeypatch.setattr("app.api.render_pipeline", _fake_pipeline, raising=False)
+    # Patch the renderer dispatcher used by api.py
+    monkeypatch.setattr("app.api.run_render", _fake_pipeline, raising=True)
     yield
     if TMP_OUT.exists():
         TMP_OUT.unlink()

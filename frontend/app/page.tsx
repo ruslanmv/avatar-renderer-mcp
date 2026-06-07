@@ -26,7 +26,9 @@ import {
 import HuggingFaceLogin from '../components/HuggingFaceLogin';
 import { authHeaders } from '../lib/api';
 
-const API_BASE = process.env.NEXT_PUBLIC_AVATAR_API_BASE || 'http://localhost:8000';
+const API_BASE =
+  process.env.NEXT_PUBLIC_AVATAR_API_BASE ||
+  'https://ruslanmv-avatar-renderer.hf.space';
 
 const AVATARS = [
   {

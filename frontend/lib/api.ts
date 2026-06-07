@@ -7,8 +7,11 @@
 // back to the frontend with ?session_token=... which we capture once on load.
 // ---------------------------------------------------------------------------
 
+// Defaults to the deployed Hugging Face Space so the Vercel app works even
+// without setting NEXT_PUBLIC_AVATAR_API_BASE. Override it for local dev.
 export const API_BASE =
-  process.env.NEXT_PUBLIC_AVATAR_API_BASE || 'http://localhost:8000';
+  process.env.NEXT_PUBLIC_AVATAR_API_BASE ||
+  'https://ruslanmv-avatar-renderer.hf.space';
 
 const SESSION_KEY = 'avatar_session_token';
 
