@@ -9,3 +9,8 @@ imageio-ffmpeg
 requests
 pydantic>=2,<3
 pydantic-settings>=2,<3
+
+# In-process Wav2Lip lip-sync (talking-face motion)
+opencv-python-headless
+librosa
+soundfile

@@ -28,6 +28,16 @@ import gradio as gr
 
 from app.render import render  # lazy/heavy imports happen inside render()
 
+# Pre-fetch the Wav2Lip code + weights at startup (outside the GPU window) so the
+# first inference call doesn't spend its GPU budget cloning/downloading. Safe to
+# fail — render() falls back to the ffmpeg renderer.
+try:
+    from app.lipsync import ensure_setup
+
+    ensure_setup()
+except Exception:  # never block startup on this
+    pass
+
 _OUT_DIR = Path(tempfile.gettempdir()) / "zerogpu-jobs"
 _OUT_DIR.mkdir(parents=True, exist_ok=True)
 
