@@ -21,29 +21,25 @@ from pathlib import Path
 
 
 def _setup_engine_paths() -> None:
-    """Point MODEL_ROOT / EXT_DEPS_DIR / sys.path at the cloned engine repos so
-    the engine-registry availability probes succeed.
+    """Set the engine env and make the repo root win on sys.path.
 
-    Critical: the repo root must take PRECEDENCE over the engine repos — several
-    of them ship top-level modules that collide with ours (e.g. MuseTalk/app.py
-    would otherwise shadow this project's `app` package). So engine dirs are
-    appended (low priority) and the repo root is forced to the front.
+    Do NOT pre-seed the engine repos onto sys.path. The pipeline loads each engine
+    repo itself (app.pipeline.load_module_from_path inserts the engine dir at the
+    FRONT when it imports e.g. FOMM's fomm_wrapper.py) — but it SKIPS that
+    promotion if the dir is already on sys.path. If we pre-added the dirs, the
+    repo's own top-level modules (`demo.py`, the `app` package) would shadow the
+    engines' identically-named modules (FOMM's `demo.py` → ImportError on
+    `load_checkpoints`; MuseTalk's `app.py`). The premium subprocesses (Diff2Lip,
+    MuseTalk) build their own PYTHONPATH, and app.lipsync adds the Wav2Lip dir
+    on demand — so the repo root on sys.path is all we need here.
     """
     repo = Path(os.environ.get("REPO_DIR", Path(__file__).resolve().parents[1]))
-    model_root = os.environ.setdefault("MODEL_ROOT", str(repo / "models"))
-    ext = os.environ.setdefault("EXT_DEPS_DIR", str(repo / "external_deps"))
-    subs = ["first-order-model", "Wav2Lip", "SadTalker", "Diff2Lip",
-            "guided-diffusion", "MuseTalk", "LatentSync"]
-    for s in subs:
-        p = f"{ext}/{s}"
-        if os.path.isdir(p) and p not in sys.path:
-            sys.path.append(p)            # engine repos: lowest precedence
+    os.environ.setdefault("MODEL_ROOT", str(repo / "models"))
+    os.environ.setdefault("EXT_DEPS_DIR", str(repo / "external_deps"))
+    os.environ.setdefault("LIPSYNC_HF_REPO", "ruslanmv/avatar-renderer")
     if str(repo) in sys.path:
         sys.path.remove(str(repo))
     sys.path.insert(0, str(repo))         # the repo's own `app` package wins
-    os.environ["PYTHONPATH"] = ":".join([str(repo)] + [f"{ext}/{s}" for s in subs])
-    os.environ.setdefault("LIPSYNC_HF_REPO", "ruslanmv/avatar-renderer")
-    _ = model_root  # documented side effect
 
 
 def main() -> int:
