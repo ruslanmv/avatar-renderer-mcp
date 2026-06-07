@@ -24,11 +24,7 @@ import {
 } from 'lucide-react';
 
 import HuggingFaceLogin from '../components/HuggingFaceLogin';
-import { authHeaders } from '../lib/api';
-
-const API_BASE =
-  process.env.NEXT_PUBLIC_AVATAR_API_BASE ||
-  'https://ruslanmv-avatar-renderer.hf.space';
+import { generateAvatar } from '../lib/gradioClient';
 
 const AVATARS = [
   {
@@ -87,7 +83,6 @@ export default function Page() {
   const [progress, setProgress] = useState(0);
   const [statusText, setStatusText] = useState('Initializing...');
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
-  const [jobId, setJobId] = useState<string | null>(null);
 
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -116,89 +111,42 @@ export default function Page() {
 
     setIsGenerating(true);
     setProgress(0);
-    setStatusText('Initializing...');
+    setStatusText('Connecting to GPU backend...');
     setVideoUrl(null);
 
-    const fd = new FormData();
-    fd.append('avatar', avatarFile);
-    fd.append('audio', audioFile);
-    fd.append('qualityMode', qualityMode);
-    if (enabledEnhancements.length > 0) {
-      fd.append('enhancements', enabledEnhancements.join(','));
-    }
-    if (script.trim()) {
-      fd.append('transcript', script.trim());
-    }
+    // Indeterminate progress while the Space runs inference on ZeroGPU.
+    const steps = [
+      { p: 20, s: 'Uploading inputs...' },
+      { p: 45, s: 'Allocating GPU...' },
+      { p: 70, s: 'Rendering avatar...' },
+      { p: 90, s: 'Finalizing video...' },
+    ];
+    let stepIndex = 0;
+    const stepInterval = setInterval(() => {
+      if (stepIndex < steps.length) {
+        setProgress(steps[stepIndex].p);
+        setStatusText(steps[stepIndex].s);
+        stepIndex++;
+      }
+    }, 1200);
 
     try {
-      const res = await fetch(`${API_BASE}/render-upload`, {
-        method: 'POST',
-        headers: authHeaders(),
-        body: fd,
-      });
-
-      if (res.status === 401) {
-        throw new Error('Please sign in with Hugging Face before rendering.');
-      }
-
-      if (!res.ok) {
-        throw new Error(`Upload failed: ${res.status}`);
-      }
-
-      const data = await res.json();
-      setJobId(data.jobId);
-
-      await pollStatus(data.jobId);
+      // Inference runs entirely on the Hugging Face Space (no GPU on Vercel).
+      const url = await generateAvatar(avatarFile, audioFile, qualityMode);
+      clearInterval(stepInterval);
+      setVideoUrl(url);
+      setProgress(100);
+      setStatusText('Complete!');
     } catch (err) {
+      clearInterval(stepInterval);
       alert(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
       setIsGenerating(false);
     }
   };
 
-  const pollStatus = async (id: string) => {
-    const steps = [
-      { p: 25, s: 'Mapping facial features...' },
-      { p: 50, s: 'Processing voice input...' },
-      { p: 75, s: 'Rendering expressions...' },
-      { p: 100, s: 'Finalizing avatar...' },
-    ];
-
-    let stepIndex = 0;
-    const stepInterval = setInterval(() => {
-      if (stepIndex < steps.length) {
-        const step = steps[stepIndex];
-        setProgress(step.p);
-        setStatusText(step.s);
-        stepIndex++;
-      }
-    }, 1000);
-
-    for (let i = 0; i < 300; i++) {
-      const r = await fetch(`${API_BASE}/status/${id}`, { headers: authHeaders() });
-
-      const ct = r.headers.get('content-type') || '';
-      if (r.ok && ct.includes('video/mp4')) {
-        clearInterval(stepInterval);
-        const blob = await r.blob();
-        const url = URL.createObjectURL(blob);
-        setVideoUrl(url);
-        setProgress(100);
-        setStatusText('Complete!');
-        setIsGenerating(false);
-        return;
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-    }
-
-    clearInterval(stepInterval);
-    alert('Timed out waiting for generation');
-    setIsGenerating(false);
-  };
-
   const handleCreateAnother = () => {
     setVideoUrl(null);
-    setJobId(null);
     setProgress(0);
     setStatusText('Initializing...');
   };

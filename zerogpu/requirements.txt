@@ -1,9 +1,14 @@
-# Optional ZeroGPU Gradio Space requirements (Phase 5).
-# The heavy ML stack (torch, opencv, gfpgan, …) comes from the repo's
-# pyproject.toml — install the package itself alongside these.
-#
-#   pip install -e ..            # the avatar-renderer-mcp package + deps
-#   pip install -r requirements.txt
-#
-gradio>=4.44.0
-spaces>=0.30.0
+# ZeroGPU Gradio Space requirements.
+# Kept lean so the Space builds reliably. The guaranteed render path (ffmpeg)
+# needs no ML deps; torch is present so the @spaces.GPU function runs real GPU
+# code once an in-process model is wired in.
+gradio==4.44.1
+spaces
+torch
+pillow
+numpy
+imageio-ffmpeg
+requests
+pydantic>=2,<3
+pydantic-settings>=2,<3
+huggingface_hub
