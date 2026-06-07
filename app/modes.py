@@ -80,6 +80,30 @@ RENDER_CONFIGS = {
 # Back-compat: "auto" behaves like standard (fallback allowed).
 RENDER_CONFIGS["auto"] = RENDER_CONFIGS["standard"]
 
+# Preferred lip-sync engines per tier (orchestrator picks the first available +
+# license-allowed). Premium prefers the best models; preview/real_time stay
+# in-process so they run on the ZeroGPU preview Space.
+PREFERRED_ENGINES = {
+    "preview": ["simple", "wav2lip_fast"],
+    "real_time": ["wav2lip_fast", "simple"],
+    "standard": ["musetalk", "diff2lip", "wav2lip_fast", "simple"],
+    "high_quality": ["latentsync", "musetalk", "diff2lip"],
+    "premium": ["latentsync", "musetalk"],
+    "cinematic": ["latentsync", "sadtalker"],
+}
+PREFERRED_ENGINES["auto"] = PREFERRED_ENGINES["standard"]
+
+# Tiers that must use commercial-safe engines only.
+COMMERCIAL_REQUIRED = {"premium", "cinematic"}
+
+
+def get_preferred_engines(quality_mode):
+    return PREFERRED_ENGINES.get((quality_mode or "standard").strip().lower(), PREFERRED_ENGINES["standard"])
+
+
+def commercial_required(quality_mode):
+    return (quality_mode or "").strip().lower() in COMMERCIAL_REQUIRED
+
 
 def get_render_config(quality_mode: Optional[str]) -> RenderConfig:
     """Resolve a quality mode to its RenderConfig (defaults to standard)."""

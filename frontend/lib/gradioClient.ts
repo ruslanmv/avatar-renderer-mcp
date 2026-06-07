@@ -48,7 +48,7 @@ export async function generateAvatar(opts: GenerateOptions): Promise<string> {
     opts.pitch ?? 0,
     opts.quality ?? 'auto',
     opts.enhancements ?? [],
-    opts.method ?? 'wav2lip_gfpgan',
+    opts.method ?? 'wav2lip_fast',
   ]);
 
   // Gradio 5's Video output is { video: <FileData|str>, subtitles }. Normalize

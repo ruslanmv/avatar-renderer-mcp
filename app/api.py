@@ -286,6 +286,16 @@ def hf_callback(request: Request, code: Optional[str] = None, state: Optional[st
     return redirect
 
 
+@app.get("/engines")
+def list_engines():
+    """List lip-sync engines with availability + commercial license (multi-engine)."""
+    try:
+        from .engines import registry as eng
+        return JSONResponse({"engines": eng.info_all()})
+    except Exception as exc:  # never break on the registry
+        return JSONResponse({"engines": [], "error": str(exc)}, status_code=200)
+
+
 @app.get("/me")
 def me(user: Optional[dict] = Depends(require_user)):
     """Return the signed-in user's public profile (never the HF access token).

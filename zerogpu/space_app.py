@@ -106,28 +106,32 @@ def synthesize_tts(text: str, voice: str, speed_pct: int, pitch_hz: int) -> str:
 # Wav2Lip-pipeline) restore the dev-v0.1.25 high-quality path and require the full
 # GPU build (external repos + weights). The in-process engines run on this Space.
 METHOD_CHOICES = [
-    ("Auto — best available model", "auto"),
-    ("MuseTalk — premium lip-sync (GPU build)", "musetalk"),
-    ("LatentSync — premium lip-sync (GPU build)", "latentsync"),
+    ("Auto — best available engine", "auto"),
+    ("LatentSync — premium diffusion (GPU build)", "latentsync"),
+    ("MuseTalk — premium real-time (GPU build)", "musetalk"),
     ("Diff2Lip — diffusion lip-sync (GPU build)", "diff2lip"),
-    ("Wav2Lip — pipeline + GFPGAN (GPU build)", "wav2lip_pipeline"),
-    ("Wav2Lip fast — in-process (this Space)", "wav2lip_gfpgan"),
-    ("Full-face — head motion, static bg", "fullface"),
+    ("Wav2Lip — pipeline (research license, GPU build)", "wav2lip"),
+    ("Wav2Lip fast — in-process (this Space)", "wav2lip_fast"),
+    ("Full-face — head motion, static bg (this Space)", "fullface"),
     ("Simple — no lip-sync", "simple"),
 ]
 
 
 @gpu
-def _gpu_render(image_path: str, audio_path: str, addons, method, quality_mode) -> str:
-    """GPU-allocated render (Wav2Lip + GFPGAN + add-ons / chosen method/tier)."""
+def _gpu_render(image_path: str, audio_path: str, addons, engine, quality_mode) -> str:
+    """GPU-allocated render via the multi-engine orchestrator."""
+    from app.render import orchestrate
+
+    engine = (engine or "auto")
+    # Naturalness add-ons (head motion / blink) are delivered by the in-process
+    # "fullface" engine, so route there when requested on an in-process tier.
+    if addons and engine in ("auto", "wav2lip_fast"):
+        engine = "fullface"
+
     out_path = str(_OUT_DIR / f"{uuid.uuid4()}.mp4")
-    return render(
-        face_image=image_path,
-        audio=audio_path,
-        out_path=out_path,
-        enhancements=(addons or None),
-        method=(method or "auto"),
-        quality_mode=(quality_mode or "standard"),
+    return orchestrate(
+        face_image=image_path, audio=audio_path, out_path=out_path,
+        quality_mode=(quality_mode or "standard"), engine=engine,
     )
 
 
@@ -200,7 +204,7 @@ def build_ui() -> gr.Blocks:
                     info="Strict tiers (high_quality/premium/cinematic) never deliver a degraded fallback.",
                 )
                 method = gr.Dropdown(
-                    choices=METHOD_CHOICES, value="wav2lip_gfpgan", label="Lip-sync engine",
+                    choices=METHOD_CHOICES, value="wav2lip_fast", label="Lip-sync engine",
                     info="Premium engines (MuseTalk/LatentSync/Diff2Lip) need the full GPU build; "
                          "in-process engines run on this ZeroGPU Space.",
                 )

@@ -153,6 +153,104 @@ def render_workflow(
     )
 
 
+# ── Engine-centric orchestrator (the multi-engine "best solution") ───────────
+_LEGACY_ENGINE_ALIASES = {"wav2lip_gfpgan": "wav2lip_fast", "wav2lip_pipeline": "wav2lip"}
+
+
+def select_engine(quality_mode: str, requested: str = "auto", commercial: bool = False) -> str:
+    """Choose the lip-sync engine for a tier: explicit (validated) or best-available.
+
+    Honors availability + commercial license. Strict tiers raise if nothing
+    suitable is available (never silently downgrade).
+    """
+    from .compliance import assert_engine_allowed, is_commercial_safe
+    from .engines import registry as eng
+    from .modes import commercial_required, get_preferred_engines, is_strict
+
+    commercial = commercial or commercial_required(quality_mode)
+    strict = is_strict(quality_mode)
+    req = _LEGACY_ENGINE_ALIASES.get((requested or "auto").strip().lower(),
+                                     (requested or "auto").strip().lower())
+
+    if req and req != "auto":
+        if not eng.has(req):
+            raise ValueError(f"Unknown engine: {req}")
+        if not eng.get(req).is_available():
+            raise RuntimeError(f"Engine '{req}' is not available on this deployment.")
+        assert_engine_allowed(req, commercial=commercial)
+        return req
+
+    for name in get_preferred_engines(quality_mode):
+        if not eng.has(name) or not eng.get(name).is_available():
+            continue
+        if commercial and not is_commercial_safe(name):
+            continue
+        return name
+
+    if strict:
+        raise RuntimeError(
+            f"No available {'commercial-safe ' if commercial else ''}engine for "
+            f"tier '{quality_mode}'. Install the premium engines (GPU build)."
+        )
+    for fb in ("wav2lip_fast", "simple"):
+        if eng.has(fb) and eng.get(fb).is_available():
+            return fb
+    return "simple"
+
+
+def orchestrate(
+    *, face_image: str, audio: str, out_path: str,
+    quality_mode: str = "standard", engine: str = "auto", commercial: bool = False,
+) -> str:
+    """Multi-engine render: select engine → run → (soft fallback) → quality gate/report."""
+    from .compliance import license_info
+    from .engines import registry as eng
+    from .modes import get_render_config, is_strict
+    from .simple_render import simple_render
+
+    config = get_render_config(quality_mode)
+    strict = is_strict(quality_mode)
+    chosen = select_engine(quality_mode, engine, commercial)
+    prov = {"quality_mode": quality_mode, "engine": chosen, "strict": strict,
+            "commercial": commercial, "fallback_used": False,
+            "license": license_info(chosen).get("license")}
+
+    out = None
+    try:
+        log.info("Orchestrate: mode=%s engine=%s strict=%s", quality_mode, chosen, strict)
+        out = eng.get(chosen)._run(face_image=face_image, audio=audio, out_path=out_path)
+    except Exception as exc:
+        if strict:
+            raise RuntimeError(f"'{quality_mode}' render failed on engine '{chosen}': {exc}") from exc
+        log.warning("Engine '%s' failed (%s); trying fallbacks.", chosen, exc)
+        prov["fallback_used"] = True
+        for fb in ("wav2lip_fast", "simple"):
+            if fb == chosen or not (eng.has(fb) and eng.get(fb).is_available()):
+                continue
+            try:
+                out = eng.get(fb)._run(face_image=face_image, audio=audio, out_path=out_path)
+                prov["engine"] = fb
+                break
+            except Exception as fexc:
+                log.warning("Fallback '%s' failed: %s", fb, fexc)
+        if out is None:
+            out = simple_render(face_image=face_image, audio=audio, out_path=out_path)
+            prov["engine"] = "simple"
+
+    try:
+        from .quality import compute_quality_report, write_quality_report
+        report = compute_quality_report(out, config=config, provenance=prov)
+        write_quality_report(str(Path(out).parent), report)
+        log.info("Quality report: passed=%s metrics=%s", report.get("passed"), report.get("metrics"))
+        if strict and not report.get("passed", True):
+            raise RuntimeError(f"'{quality_mode}' quality gate failed: {report.get('failures')}")
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        log.warning("Quality report skipped: %s", exc)
+    return out
+
+
 def _try_pipeline(**kwargs) -> str:
     from .pipeline import render_pipeline  # heavy import (torch) — lazy
 
