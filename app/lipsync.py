@@ -41,8 +41,10 @@ IMG_SIZE = 96            # Wav2Lip face crop size
 MEL_STEP_SIZE = 16
 FPS = 25
 
-# Remove "mouth-within-a-mouth" remnants before face restoration (default on).
-_MOUTH_CLEANUP = os.getenv("LIPSYNC_MOUTH_CLEANUP", "1") == "1"
+# Remove "mouth-within-a-mouth" remnants before restoration. Default OFF: the
+# hard mouth-core mask already prevents the double-lip artifact, and the cleanup
+# darkening can smudge lips/chin. Enable only for problematic smiley sources.
+_MOUTH_CLEANUP = os.getenv("LIPSYNC_MOUTH_CLEANUP", "0") == "1"
 
 
 def _cleanup_frame(frame, face_box=None):

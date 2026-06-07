@@ -70,26 +70,26 @@ def cleanup_frame(frame, face_box=None):
     v = hsv[:, :, 2]
 
     # The open cavity is the darker interior; only act when a real cavity exists.
-    dark = (v < max(60, int(np.percentile(v, 35)))).astype(np.uint8) * 255
+    dark = (v < max(55, int(np.percentile(v, 30)))).astype(np.uint8) * 255
     dark = cv2.morphologyEx(dark, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
-    cavity_ratio = float((dark > 0).mean())
-    if cavity_ratio < 0.06:  # mouth essentially closed → nothing to clean
+    if float((dark > 0).mean()) < 0.08:  # mouth essentially closed → nothing to clean
         return frame
 
-    # Candidate remnants: lip/skin-coloured (reddish) pixels that sit INSIDE the
-    # dark cavity (i.e., a second mouth), but NOT bright teeth (high V).
-    reddish = cv2.inRange(hsv, np.array([0, 35, 60]), np.array([22, 190, 200]))
-    reddish |= cv2.inRange(hsv, np.array([160, 35, 60]), np.array([180, 190, 200]))
-    inside = cv2.dilate(dark, np.ones((9, 9), np.uint8), iterations=1)
-    artifact = cv2.bitwise_and(reddish, inside)
+    # Only act on remnants STRICTLY INSIDE the cavity: erode the cavity so we
+    # never touch lips/skin/chin at the boundary (that caused gray smudges).
+    core = cv2.erode(dark, np.ones((7, 7), np.uint8), iterations=1)
+    reddish = cv2.inRange(hsv, np.array([0, 40, 70]), np.array([18, 170, 180]))
+    reddish |= cv2.inRange(hsv, np.array([165, 40, 70]), np.array([180, 170, 180]))
+    artifact = cv2.bitwise_and(reddish, core)
     artifact = cv2.morphologyEx(artifact, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
 
-    if int((artifact > 0).sum()) < 30:
+    # Require a substantial enclosed blob, not scattered pixels.
+    if int((artifact > 0).sum()) < 120:
         return frame
 
-    # Darken the remnant toward the cavity colour and feather it in.
-    feather = (cv2.GaussianBlur(artifact, (0, 0), sigmaX=3) / 255.0)[..., None]
-    darkened = (roi.astype(np.float32) * 0.45)
+    # Gentle darken (toward cavity), tightly feathered — never a hard patch.
+    feather = (cv2.GaussianBlur(artifact, (0, 0), sigmaX=2) / 255.0)[..., None] * 0.6
+    darkened = roi.astype(np.float32) * 0.6
     blended = (roi.astype(np.float32) * (1 - feather) + darkened * feather).astype(np.uint8)
 
     out = frame.copy()
