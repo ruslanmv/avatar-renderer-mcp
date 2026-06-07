@@ -124,6 +124,20 @@ alternative anti-flicker compositing (mouth band on a static base).
 > True 3D head-pose & expression (SadTalker/LivePortrait) is the recommended next
 > tier — see [`docs/NATURALNESS_DESIGN.md`](docs/NATURALNESS_DESIGN.md).
 
+### Premium engines (MuseTalk · LatentSync · Diff2Lip) on a Colab GPU
+
+The premium engines can't run on the ZeroGPU Space (it only GPU-accelerates
+in-process code; these run as subprocesses needing their own repos + weights).
+Run them on a **real** Colab GPU instead:
+
+[![Open premium notebook In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ruslanmv/avatar-renderer-mcp/blob/main/demo_colab_premium.ipynb)
+&nbsp;`demo_colab_premium.ipynb`
+
+It installs MuseTalk/Diff2Lip/FOMM (+ optional LatentSync), then renders through the
+same `orchestrate()` engine selector used in production. **Free T4** runs
+MuseTalk + Diff2Lip + Wav2Lip; **LatentSync** needs an A100/L4 (Colab Pro).
+See [`COLAB_SETUP.md`](COLAB_SETUP.md).
+
 ---
 
 ## 10 Enhancement Modules
