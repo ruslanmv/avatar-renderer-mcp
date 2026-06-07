@@ -35,13 +35,21 @@ INTRO = (
 )
 
 
-def _detect_box(frame):
-    try:
-        from app.lipsync import _detect_face_box
-        return _detect_face_box(frame)
-    except Exception:
-        h, w = frame.shape[:2]
-        return 0, 0, w, h
+def _good_box(frames):
+    """Find a real face box across a few frames; fall back to a centered portrait
+    box if detection fails (otherwise the ROI = whole frame, which makes the
+    background dominate sharpness and zeroes out 'mouth motion')."""
+    h, w = frames[0].shape[:2]
+    idxs = sorted(set([0, len(frames) // 3, len(frames) // 2]))
+    for i in idxs:
+        try:
+            from app.lipsync import _detect_face_box
+            x, y, x2, y2 = _detect_face_box(frames[i])
+        except Exception:
+            x, y, x2, y2 = 0, 0, w, h
+        if (x2 - x) * (y2 - y) < 0.85 * w * h and (x2 - x) > 0.10 * w:
+            return x, y, x2, y2
+    return int(0.30 * w), int(0.12 * h), int(0.70 * w), int(0.66 * h)
 
 
 def measure(mp4: str, work: Path) -> dict:
@@ -57,7 +65,7 @@ def measure(mp4: str, work: Path) -> dict:
         return {"frames": 0}
     col = [cv2.imread(f) for f in files]
     gray = [cv2.cvtColor(c, cv2.COLOR_BGR2GRAY).astype("int16") for c in col]
-    x, y, x2, y2 = _detect_box(col[0])
+    x, y, x2, y2 = _good_box(col)
     fw, fh = x2 - x, y2 - y
     n = len(gray)
 
