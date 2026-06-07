@@ -102,19 +102,29 @@ def synthesize_tts(text: str, voice: str, speed_pct: int, pitch_hz: int) -> str:
     return out
 
 
+METHOD_CHOICES = [
+    ("Best — mouth + GFPGAN (sharp)", "wav2lip_gfpgan"),
+    ("Full face — head motion, static background", "fullface"),
+    ("Basic lip-sync (no GFPGAN)", "wav2lip"),
+    ("Simple (no lip-sync)", "simple"),
+    ("Auto", "auto"),
+]
+
+
 @gpu
-def _gpu_render(image_path: str, audio_path: str, addons) -> str:
-    """GPU-allocated render (Wav2Lip + GFPGAN + add-ons)."""
+def _gpu_render(image_path: str, audio_path: str, addons, method) -> str:
+    """GPU-allocated render (Wav2Lip + GFPGAN + add-ons / chosen method)."""
     out_path = str(_OUT_DIR / f"{uuid.uuid4()}.mp4")
     return render(
         face_image=image_path,
         audio=audio_path,
         out_path=out_path,
         enhancements=(addons or None),
+        method=(method or "auto"),
     )
 
 
-def generate(image_path, audio_path, text, voice, speed, pitch, quality_mode, addons):
+def generate(image_path, audio_path, text, voice, speed, pitch, quality_mode, addons, method="auto"):
     """UI/API handler: optional TTS from text, then GPU lip-sync render.
 
     Audio source: if `text` is provided it is synthesized (edge-tts) and used;
@@ -137,7 +147,7 @@ def generate(image_path, audio_path, text, voice, speed, pitch, quality_mode, ad
     addons = [label_to_id.get(a, a) for a in (addons or [])]
 
     try:
-        return _gpu_render(image_path, audio_path, addons)
+        return _gpu_render(image_path, audio_path, addons, method or "auto")
     except Exception as exc:
         raise gr.Error(f"Rendering failed: {exc}") from exc
 
@@ -179,6 +189,10 @@ def build_ui() -> gr.Blocks:
                 quality = gr.Dropdown(
                     choices=["auto", "real_time", "high_quality"], value="auto", label="Quality mode"
                 )
+                method = gr.Dropdown(
+                    choices=METHOD_CHOICES, value="wav2lip_gfpgan", label="Generation method",
+                    info="Compare approaches: best mouth, full-face head motion, basic, or simple.",
+                )
                 addons = gr.CheckboxGroup(
                     choices=ADDON_CHOICES,
                     value=[],
@@ -202,7 +216,7 @@ def build_ui() -> gr.Blocks:
 
         btn.click(
             generate,
-            inputs=[image, audio, text, voice, speed, pitch, quality, addons],
+            inputs=[image, audio, text, voice, speed, pitch, quality, addons, method],
             outputs=out,
             api_name="predict",
         )

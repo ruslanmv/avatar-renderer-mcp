@@ -22,6 +22,7 @@ ffmpeg renderer so the product never hard-fails.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import subprocess
 import sys
@@ -159,7 +160,13 @@ def _load_model(ckpt: Path, device: str):
 
 
 def wav2lip_render(
-    *, face_image: str, audio: str, out_path: str, enhancements: "list | None" = None
+    *,
+    face_image: str,
+    audio: str,
+    out_path: str,
+    enhancements: "list | None" = None,
+    use_gfpgan: "bool | None" = None,
+    head_motion: bool = False,
 ) -> str:
     """Render a lip-synced talking-face MP4. Raises on failure (caller falls back)."""
     import cv2
@@ -240,7 +247,8 @@ def wav2lip_render(
     silent = [r < sil_thr for r in rms] if peak > 0 else [False] * len(mel_chunks)
 
     model = _load_model(ckpt, device)
-    restorer = _get_gfpgan(device) if os.getenv("LIPSYNC_GFPGAN", "1") == "1" else None
+    want_gfpgan = use_gfpgan if use_gfpgan is not None else (os.getenv("LIPSYNC_GFPGAN", "1") == "1")
+    restorer = _get_gfpgan(device) if want_gfpgan else None
 
     frames_dir = tmp / "frames"
     frames_dir.mkdir()
@@ -279,6 +287,16 @@ def wav2lip_render(
     # Full-image mask, hard core over the mouth (feather only in skin) — same
     # guarantee at composite time so the static base's closed mouth can't show.
     comp_mask = _mouth_mask(full.shape[0], full.shape[1], oy=y1, ox=x1)
+
+    # Whole-head motion mask (feathered ellipse over the head). When head_motion
+    # is on, the head moves subtly while the BACKGROUND stays static (the head is
+    # warped and composited back over the static base only inside this mask).
+    head_mask = None
+    if head_motion:
+        hm = np.zeros(full.shape[:2], np.float32)
+        cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+        cv2.ellipse(hm, (cx, cy), (int(bw * 0.90), int(bh * 1.10)), 0, 0, 360, 1.0, -1)
+        head_mask = cv2.GaussianBlur(hm, (0, 0), sigmaX=bw * 0.07, sigmaY=bh * 0.07)[..., None]
 
     batch = 64
     written = 0
@@ -322,6 +340,26 @@ def wav2lip_render(
                 frame = cv2.resize(frame, (base_still.shape[1], base_still.shape[0]))
             out_frame = (base_still.astype(np.float32) * (1.0 - comp_mask)
                          + frame.astype(np.float32) * comp_mask).astype(np.uint8)
+
+            # Whole-head motion on a STATIC background: warp the head and
+            # composite it back over the static base only inside the head mask.
+            if head_mask is not None:
+                t = written / float(FPS)
+                dx = 3.0 * math.sin(2 * math.pi * 0.25 * t)
+                dy = 2.0 * math.sin(2 * math.pi * 0.18 * t + 1.0)
+                ang = 0.8 * math.sin(2 * math.pi * 0.20 * t)
+                sc = 1.0 + 0.006 * math.sin(2 * math.pi * 0.15 * t)
+                cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+                M = cv2.getRotationMatrix2D((cx, cy), ang, sc)
+                M[0, 2] += dx
+                M[1, 2] += dy
+                warped = cv2.warpAffine(
+                    out_frame, M, (out_frame.shape[1], out_frame.shape[0]),
+                    flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE,
+                )
+                out_frame = (base_still.astype(np.float32) * (1.0 - head_mask)
+                             + warped.astype(np.float32) * head_mask).astype(np.uint8)
+
             cv2.imwrite(str(frames_dir / f"{written:05d}.png"), out_frame)
             written += 1
 
