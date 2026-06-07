@@ -27,6 +27,9 @@ eggs/
 .eggs/
 lib/
 lib64/
+# ...but the frontend's source lib/ is not a Python build dir — keep it.
+!frontend/lib/
+!frontend/lib/**
 parts/
 sdist/
 var/
@@ -252,3 +255,9 @@ token.json
 *.pth
 launcher/web/cache/preview_audio.wav
 *.wav
+
+# SaaS auth demo: local SQLite DB / persistent data
+/data/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm

@@ -13,20 +13,39 @@ api.py – FastAPI front-door for the Avatar Renderer Pod
 from __future__ import annotations
 
 import json
+import logging
+import re
 import shutil
 import uuid
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlencode, urlparse
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+)
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from . import auth_hf, security, users_db  # stdlib/requests-only; safe to import
 from .settings import Settings  # pydantic-based env loader
 
 settings = Settings()
+log = logging.getLogger("avatar-renderer.api")
+
+# Initialise the auth database when sign-in is enabled (no-op otherwise).
+if settings.AUTH_ENABLED:
+    users_db.init_db(settings.DATABASE_URL)
+    log.info("Auth enabled — SQLite store at %s", settings.DATABASE_URL)
 
 # ─────────────────── TTS imports ───────────────────────────────────────── #
 try:
@@ -41,19 +60,20 @@ except ImportError:
     tts_available = False
 
 # ─────────────────── Celery optional ────────────────────────────────────── #
+# The Celery app and render task live in app.worker (single source of truth) so
+# the API enqueues exactly the task the worker process consumes. If Celery (or a
+# heavy transitive import) is unavailable, we transparently fall back to running
+# the pipeline in a FastAPI BackgroundTask.
 celery_available = False
 try:
-    from celery import Celery
     from celery.result import AsyncResult
 
-    celery_app = Celery(
-        "avatar_renderer",
-        broker=settings.CELERY_BROKER_URL,
-        backend=settings.CELERY_BACKEND_URL or settings.CELERY_BROKER_URL,
-    )
+    from .worker import celery_app, render_task
+
     celery_available = bool(settings.CELERY_BROKER_URL)
 except ImportError:
     celery_app = None  # type: ignore
+    render_task = None  # type: ignore
 
 # import pipeline after Celery to avoid GPU init on health checks
 from .pipeline import render_pipeline  # noqa: E402
@@ -66,16 +86,16 @@ app = FastAPI(
 )
 
 # ───────────────────────────── CORS setup ────────────────────────────────── #
+# CORS_ALLOW_ORIGINS may be a comma-separated list of explicit origins, or "*".
+# Per the CORS spec a wildcard origin cannot be combined with credentials, so we
+# only enable credentials when explicit origins are configured.
+_cors_origins = [o.strip() for o in settings.CORS_ALLOW_ORIGINS.split(",") if o.strip()]
+_allow_credentials = "*" not in _cors_origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "*",
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "https://*.vercel.app",
-        "https://vercel.app",
-    ],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_origin_regex=settings.CORS_ALLOW_ORIGIN_REGEX,
+    allow_credentials=_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -94,6 +114,217 @@ if _STATIC_DIR.is_dir():
 
 WORK_ROOT = Path("/tmp/avatar-jobs")
 WORK_ROOT.mkdir(parents=True, exist_ok=True)
+
+
+# ───────────────────────── Auth dependencies ─────────────────────────────── #
+def _session_token_from_request(request: Request) -> Optional[str]:
+    """Extract the app session token from the Authorization header or query."""
+    return (
+        security.extract_bearer_token(request.headers.get("Authorization"))
+        or request.query_params.get("session_token")
+    )
+
+
+def get_optional_user(request: Request) -> Optional[dict]:
+    """Return the signed-in user, or None. Always None when AUTH is disabled."""
+    if not settings.AUTH_ENABLED:
+        return None
+    token = _session_token_from_request(request)
+    if not token:
+        return None
+    return users_db.get_user_by_session(settings.DATABASE_URL, token)
+
+
+def require_user(request: Request) -> Optional[dict]:
+    """FastAPI dependency: enforce a valid session when AUTH is enabled.
+
+    When AUTH is disabled this is a no-op (returns None), so existing behaviour
+    and the test suite are unaffected.
+    """
+    if not settings.AUTH_ENABLED:
+        return None
+    user = get_optional_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="authentication required")
+    return user
+
+
+# ───────────────────── Hugging Face OAuth endpoints ──────────────────────── #
+_OAUTH_STATE_COOKIE = "hf_oauth_state"
+_OAUTH_RETURN_COOKIE = "hf_oauth_return_to"
+
+
+def _require_auth_configured() -> None:
+    if not settings.AUTH_ENABLED:
+        raise HTTPException(503, "authentication is disabled on this server")
+    if not (settings.HF_CLIENT_ID and settings.HF_CLIENT_SECRET and settings.HF_REDIRECT_URI):
+        raise HTTPException(500, "Hugging Face OAuth is not configured (missing HF_CLIENT_* / HF_REDIRECT_URI)")
+
+
+def _allowed_frontend_origins() -> list[str]:
+    """Origins the backend is willing to redirect back to after login."""
+    origins = [o.strip() for o in settings.CORS_ALLOW_ORIGINS.split(",") if o.strip()]
+    # The configured FRONTEND_URL origin is always allowed.
+    fe = urlparse(settings.FRONTEND_URL)
+    if fe.scheme and fe.netloc:
+        origins.append(f"{fe.scheme}://{fe.netloc}")
+    return origins
+
+
+def _is_allowed_return_to(url: Optional[str]) -> bool:
+    """Validate a post-login redirect target against the allowlist + regex.
+
+    Only the scheme://host (origin) is checked; this prevents open-redirect
+    abuse while still letting any approved Vercel preview/prod domain work.
+    """
+    if not url:
+        return False
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return False
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    allowed = _allowed_frontend_origins()
+    if "*" in allowed or origin in allowed:
+        return True
+    regex = settings.CORS_ALLOW_ORIGIN_REGEX
+    return bool(regex) and re.fullmatch(regex, origin) is not None
+
+
+def _resolve_return_to(requested: Optional[str]) -> str:
+    """Pick a safe frontend origin to return to (requested if allowed, else FRONTEND_URL)."""
+    if requested and _is_allowed_return_to(requested):
+        parsed = urlparse(requested)
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return settings.FRONTEND_URL
+
+
+@app.get("/auth/huggingface/login", include_in_schema=True)
+def hf_login(return_to: Optional[str] = None):
+    """Redirect the browser to Hugging Face to authorize the app.
+
+    ``return_to`` (the frontend's own origin) lets login work across multiple
+    Vercel preview/production domains without reconfiguring the backend; it is
+    validated against the CORS allowlist/regex to prevent open redirects.
+    """
+    _require_auth_configured()
+    target = _resolve_return_to(return_to)
+    state = security.make_oauth_state(settings.SESSION_SECRET)
+    url = auth_hf.build_authorize_url(
+        authorize_url=settings.HF_OAUTH_AUTHORIZE_URL,
+        client_id=settings.HF_CLIENT_ID,
+        redirect_uri=settings.HF_REDIRECT_URI,
+        scopes=settings.HF_OAUTH_SCOPES,
+        state=state,
+    )
+    resp = RedirectResponse(url, status_code=302)
+    # First-party cookies on the backend domain — used to verify the callback.
+    cookie_kw = dict(max_age=600, httponly=True, secure=True, samesite="lax")
+    resp.set_cookie(_OAUTH_STATE_COOKIE, state, **cookie_kw)
+    resp.set_cookie(_OAUTH_RETURN_COOKIE, target, **cookie_kw)
+    return resp
+
+
+@app.get("/auth/huggingface/callback", include_in_schema=True)
+def hf_callback(request: Request, code: Optional[str] = None, state: Optional[str] = None):
+    """Handle the OAuth redirect: exchange code, upsert user, issue a session."""
+    _require_auth_configured()
+    if not code:
+        raise HTTPException(400, "missing authorization code")
+
+    cookie_state = request.cookies.get(_OAUTH_STATE_COOKIE)
+    if not security.verify_oauth_state(settings.SESSION_SECRET, state) or state != cookie_state:
+        raise HTTPException(400, "invalid OAuth state")
+
+    try:
+        token_data = auth_hf.exchange_code_for_token(
+            token_url=settings.HF_OAUTH_TOKEN_URL,
+            client_id=settings.HF_CLIENT_ID,
+            client_secret=settings.HF_CLIENT_SECRET,
+            redirect_uri=settings.HF_REDIRECT_URI,
+            code=code,
+        )
+        userinfo = auth_hf.fetch_user_info(
+            userinfo_url=settings.HF_OAUTH_USERINFO_URL,
+            access_token=token_data["access_token"],
+        )
+    except auth_hf.HuggingFaceAuthError as exc:
+        log.warning("OAuth failed: %s", exc)
+        raise HTTPException(502, f"Hugging Face OAuth failed: {exc}") from exc
+
+    profile = auth_hf.normalize_profile(userinfo)
+    if not profile["hf_user_id"]:
+        raise HTTPException(502, "Hugging Face userinfo missing account id")
+
+    # First authorization == sign-up; a returning account == sign-in.
+    is_new_user = users_db.get_user_by_hf_id(settings.DATABASE_URL, profile["hf_user_id"]) is None
+
+    user = users_db.upsert_user(
+        settings.DATABASE_URL,
+        hf_user_id=profile["hf_user_id"],
+        hf_username=profile["hf_username"],
+        hf_email=profile["hf_email"],
+        hf_access_token=token_data["access_token"],
+    )
+
+    session_token = security.new_session_token()
+    users_db.create_session(
+        settings.DATABASE_URL,
+        user_id=user["id"],
+        session_token=session_token,
+        ttl_hours=settings.SESSION_TTL_HOURS,
+    )
+
+    # Return to the origin that initiated login (validated), defaulting to FRONTEND_URL.
+    return_to = _resolve_return_to(request.cookies.get(_OAUTH_RETURN_COOKIE))
+    query = urlencode({"session_token": session_token, "signup": "1" if is_new_user else "0"})
+    sep = "&" if "?" in return_to else "?"
+    redirect = RedirectResponse(f"{return_to}{sep}{query}", status_code=302)
+    redirect.delete_cookie(_OAUTH_STATE_COOKIE)
+    redirect.delete_cookie(_OAUTH_RETURN_COOKIE)
+    return redirect
+
+
+@app.get("/me")
+def me(user: Optional[dict] = Depends(require_user)):
+    """Return the signed-in user's public profile (never the HF access token).
+
+    In this per-user multitenancy model each user IS their own workspace/tenant,
+    so ``workspaceId`` mirrors the user id. (When orgs are added later this is
+    where the active organization would surface.)
+    """
+    if user is None:
+        # AUTH disabled — report an anonymous/open server so the frontend adapts.
+        return JSONResponse({"authenticated": False, "authEnabled": settings.AUTH_ENABLED})
+    return JSONResponse(
+        {
+            "authenticated": True,
+            "authEnabled": True,
+            "id": user["id"],
+            "workspaceId": user["id"],
+            "hfUserId": user["hf_user_id"],
+            "username": user["hf_username"],
+            "email": user["hf_email"],
+        }
+    )
+
+
+@app.get("/me/jobs")
+def my_jobs(user: Optional[dict] = Depends(require_user)):
+    """List the signed-in user's render jobs (workspace-scoped history)."""
+    if user is None:
+        # Auth disabled — no per-user history to scope to.
+        return JSONResponse({"authEnabled": False, "jobs": []})
+    jobs = users_db.list_user_jobs(settings.DATABASE_URL, user["id"])
+    return JSONResponse({"authEnabled": True, "jobs": jobs})
+
+
+@app.post("/logout")
+def logout(request: Request):
+    """Invalidate the current session token."""
+    token = _session_token_from_request(request)
+    if token:
+        users_db.delete_session(settings.DATABASE_URL, token)
+    return JSONResponse({"status": "logged_out"})
 
 
 # ─────────────────────────── Pydantic models ────────────────────────────── #
@@ -145,11 +376,13 @@ class TextToAudioResponse(BaseModel):
     error: Optional[str] = Field(None, description="Error message (if status='error')")
 
 
-# ───────────────────────── Celery vs Thread task ─────────────────────────── #
-if celery_available:
-
-    @celery_app.task(name="render_video_task")
-    def _render_video_task(payload: dict):
+# ───────────────────────── Thread fallback task ──────────────────────────── #
+# When Celery is unavailable the pipeline runs in a FastAPI BackgroundTask.
+# Completion and failure are recorded as marker files so /status can report a
+# terminal state instead of hanging on "processing" forever.
+def _render_video_thread(payload: dict):
+    job_dir = WORK_ROOT / payload["job_id"]
+    try:
         render_pipeline(
             face_image=payload["avatar_path"],
             audio=payload["audio_path"],
@@ -160,27 +393,21 @@ if celery_available:
             enhancements=payload.get("enhancements"),
             transcript=payload.get("transcript"),
         )
-
-else:
-    def _render_video_thread(payload: dict):
-        render_pipeline(
-            face_image=payload["avatar_path"],
-            audio=payload["audio_path"],
-            reference_video=payload.get("driver_video"),
-            viseme_json=payload.get("viseme_json"),
-            quality_mode=payload.get("quality_mode", "auto"),
-            out_path=payload["out_path"],
-            enhancements=payload.get("enhancements"),
-            transcript=payload.get("transcript"),
-        )
-        # mark success for readiness
-        (WORK_ROOT / payload["job_id"] / "done").touch()
+        (job_dir / "done").touch()
+    except Exception as exc:  # surface failures via /status instead of silently hanging
+        log.exception("Render job %s failed", payload["job_id"])
+        (job_dir / "error").write_text(str(exc))
 
 
 # ───────────────────────────── REST endpoints ────────────────────────────── #
 @app.post("/render")
-def render_job(body: RenderBody, bg: BackgroundTasks):
-    """Start a render job and return jobId + status URL."""
+def render_job(body: RenderBody, bg: BackgroundTasks, user: Optional[dict] = Depends(require_user)):
+    """Start a render job from server-side file paths and return jobId + status URL.
+
+    Note: this endpoint takes server-side paths and is intended for trusted
+    callers. When AUTH_ENABLED it requires a valid session; browser/SaaS users
+    should use /render-upload instead.
+    """
     job_id = str(uuid.uuid4())
     job_dir = WORK_ROOT / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -204,10 +431,13 @@ def render_job(body: RenderBody, bg: BackgroundTasks):
     }
 
     # save original request
-    (job_dir / "request.json").write_text(json.dumps(body.dict(by_alias=True), indent=2))
+    (job_dir / "request.json").write_text(json.dumps(body.model_dump(by_alias=True), indent=2))
+
+    if user is not None:
+        users_db.record_job(settings.DATABASE_URL, user_id=user["id"], job_id=job_id)
 
     if celery_available:
-        task = _render_video_task.delay(payload)  # type: ignore
+        task = render_task.delay(payload)  # type: ignore[union-attr]
         (job_dir / "celery_id").write_text(task.id)
         async_mode = True
     else:
@@ -229,6 +459,7 @@ async def render_upload(
     qualityMode: str = Form("auto"),
     enhancements: Optional[str] = Form(None),
     transcript: Optional[str] = Form(None),
+    user: Optional[dict] = Depends(require_user),
 ):
     """Upload avatar image + audio, start render job, return jobId + status URL.
 
@@ -279,8 +510,12 @@ async def render_upload(
         )
     )
 
+    # Record ownership so the job can only be polled by the user who created it.
+    if user is not None:
+        users_db.record_job(settings.DATABASE_URL, user_id=user["id"], job_id=job_id)
+
     if celery_available:
-        task = _render_video_task.delay(payload)  # type: ignore
+        task = render_task.delay(payload)  # type: ignore[union-attr]
         (job_dir / "celery_id").write_text(task.id)
         async_mode = True
     else:
@@ -295,15 +530,30 @@ async def render_upload(
 
 
 @app.get("/status/{job_id}")
-def get_status(job_id: str):
+def get_status(job_id: str, user: Optional[dict] = Depends(require_user)):
     """Fetch job state or return the completed MP4."""
     job_dir = WORK_ROOT / job_id
     if not job_dir.exists():
         raise HTTPException(404, "job not found")
 
+    # Enforce ownership when auth is enabled.
+    if user is not None:
+        owner = users_db.get_job_owner(settings.DATABASE_URL, job_id)
+        if owner is not None and owner != user["id"]:
+            raise HTTPException(403, "you do not own this job")
+
     out_mp4 = job_dir / "out.mp4"
     if out_mp4.exists():
+        if user is not None:
+            users_db.update_job_status(
+                settings.DATABASE_URL, job_id=job_id, status="finished", completed=True
+            )
         return FileResponse(out_mp4, media_type="video/mp4")
+
+    # Surface a failed render rather than reporting "processing" forever.
+    error_marker = job_dir / "error"
+    if error_marker.exists():
+        return JSONResponse({"state": "error", "detail": error_marker.read_text()}, status_code=500)
 
     if celery_available:
         celery_id_path = job_dir / "celery_id"
@@ -312,10 +562,10 @@ def get_status(job_id: str):
         task_id = celery_id_path.read_text()
         task = AsyncResult(task_id, app=celery_app)
         return {"state": task.state}
-    else:
-        done_marker = job_dir / "done"
-        state = "finished" if done_marker.exists() else "processing"
-        return {"state": state}
+
+    done_marker = job_dir / "done"
+    state = "finished" if done_marker.exists() else "processing"
+    return {"state": state}
 
 
 # ─────────────────────── Text-to-Audio endpoint ────────────────────────────── #

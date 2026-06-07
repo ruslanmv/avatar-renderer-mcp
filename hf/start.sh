@@ -22,6 +22,19 @@ export EXT_DEPS_DIR="${EXT_DEPS_DIR:-/app/external_deps}"
 export PYTHONUNBUFFERED=1
 mkdir -p /tmp/avatar-jobs /tmp/avatar-cache "$EXT_DEPS_DIR"
 
+# -- Auth / SQLite (optional) --------------------------------------------------
+# Auth is OFF unless AUTH_ENABLED=true is set in the Space's variables/secrets.
+# Persist the SQLite DB on /data when the Space has persistent storage enabled,
+# otherwise fall back to /tmp (lost on restart — fine for a quick demo).
+# Configure these as Space SECRETS (never commit them):
+#   AUTH_ENABLED, HF_CLIENT_ID, HF_CLIENT_SECRET, HF_REDIRECT_URI,
+#   FRONTEND_URL, SESSION_SECRET
+export DATABASE_URL="${DATABASE_URL:-/data/avatar_app.sqlite3}"
+if ! mkdir -p "$(dirname "$DATABASE_URL")" 2>/dev/null; then
+    export DATABASE_URL="/tmp/avatar_app.sqlite3"
+    echo "       [info] /data not writable; using ephemeral DB at $DATABASE_URL"
+fi
+
 # -- [1/3] Clone external ML repos -------------------------------------------
 echo "[1/3] Setting up external ML dependencies..."
 

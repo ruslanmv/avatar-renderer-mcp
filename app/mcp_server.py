@@ -130,16 +130,11 @@ def _worker_loop() -> None:
             _job_q.task_done()
 
 
-threading.Thread(target=_worker_loop, daemon=True).start()
-
 # ────────────────────────  graceful shutdown  ───────────────────────────── #
 def _graceful_exit(signum, _frame):
     log.info("Signal %s received – shutting down", signum)
     _stop_flag.set()
 
-
-signal.signal(signal.SIGINT, _graceful_exit)
-signal.signal(signal.SIGTERM, _graceful_exit)
 
 # ─────────────────────────────  helpers  ─────────────────────────────────── #
 def _reply(obj: Dict):
@@ -151,13 +146,15 @@ def _handle_request(req: Dict):
     if req.get("tool") != "render_avatar":
         return _reply({"error": "unknown_tool"})
 
+    params = req.get("params") or {}
+
     # Validate params
     for key in ("avatar_path", "audio_path"):
-        if key not in req["params"]:
+        if key not in params:
             return _reply({"error": f"missing_{key}"})
 
     job_id = str(uuid.uuid4())
-    out_mp4 = req["params"].get("out_path") or f"/tmp/{job_id}.mp4"
+    out_mp4 = params.get("out_path") or f"/tmp/{job_id}.mp4"
 
     # Enqueue heavy work
     def _done(resp_success: Dict | None, error: str | None):
@@ -166,13 +163,13 @@ def _handle_request(req: Dict):
     _job_q.put(
         {
             "job_id": job_id,
-            "avatar_path": req["params"]["avatar_path"],
-            "audio_path": req["params"]["audio_path"],
-            "driver_video": req["params"].get("driver_video"),
-            "viseme_json": req["params"].get("viseme_json"),
-            "quality_mode": req["params"].get("quality_mode", "auto"),
-            "enhancements": req["params"].get("enhancements"),
-            "transcript": req["params"].get("transcript"),
+            "avatar_path": params["avatar_path"],
+            "audio_path": params["audio_path"],
+            "driver_video": params.get("driver_video"),
+            "viseme_json": params.get("viseme_json"),
+            "quality_mode": params.get("quality_mode", "auto"),
+            "enhancements": params.get("enhancements"),
+            "transcript": params.get("transcript"),
             "out_path": out_mp4,
             "on_done": _done,
         }
@@ -180,18 +177,32 @@ def _handle_request(req: Dict):
 
 
 # ─────────────────────────────  main IO  ─────────────────────────────────── #
-log.info("MCP STDIO server ready – listening for JSON on stdin")
-for line in sys.stdin:
-    if _stop_flag.is_set():
-        break
-    line = line.strip()
-    if not line:
-        continue
-    try:
-        request = json.loads(line)
-        _handle_request(request)
-    except Exception as e:
-        log.warning("Bad request: %s", e)
-        _reply({"error": "invalid_json"})
+def main() -> None:
+    """Start the worker thread and serve the STDIO request loop.
 
-log.info("MCP server stopped – bye")
+    Kept out of module scope so the module can be imported (e.g. in tests)
+    without spawning threads, installing signal handlers, or blocking on stdin.
+    """
+    threading.Thread(target=_worker_loop, daemon=True).start()
+    signal.signal(signal.SIGINT, _graceful_exit)
+    signal.signal(signal.SIGTERM, _graceful_exit)
+
+    log.info("MCP STDIO server ready – listening for JSON on stdin")
+    for line in sys.stdin:
+        if _stop_flag.is_set():
+            break
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            request = json.loads(line)
+            _handle_request(request)
+        except Exception as e:
+            log.warning("Bad request: %s", e)
+            _reply({"error": "invalid_json"})
+
+    log.info("MCP server stopped – bye")
+
+
+if __name__ == "__main__":
+    main()

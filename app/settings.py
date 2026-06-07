@@ -216,6 +216,125 @@ class Settings(BaseSettings):
     )
 
     # ─────────────────────────────────────────────────────────────────────────
+    # Authentication / Hugging Face OAuth (opt-in — disabled by default)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    AUTH_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Master switch for Hugging Face OAuth + session gating. When False "
+            "(default), render endpoints behave exactly as before (no login), "
+            "which keeps local dev and the test suite unchanged. Set True in the "
+            "deployed HF Space to require sign-in."
+        ),
+    )
+
+    HF_CLIENT_ID: Optional[str] = Field(
+        default=None, description="Hugging Face OAuth app client id."
+    )
+    HF_CLIENT_SECRET: Optional[str] = Field(
+        default=None, description="Hugging Face OAuth app client secret (never exposed to the frontend)."
+    )
+    HF_REDIRECT_URI: Optional[str] = Field(
+        default=None,
+        description="OAuth callback URL, e.g. https://<space>.hf.space/auth/huggingface/callback",
+    )
+    HF_OAUTH_SCOPES: str = Field(
+        default="openid profile email",
+        description="Space-separated OAuth scopes requested from Hugging Face.",
+    )
+    HF_OAUTH_AUTHORIZE_URL: str = Field(
+        default="https://huggingface.co/oauth/authorize",
+        description="Hugging Face OAuth authorize endpoint.",
+    )
+    HF_OAUTH_TOKEN_URL: str = Field(
+        default="https://huggingface.co/oauth/token",
+        description="Hugging Face OAuth token endpoint.",
+    )
+    HF_OAUTH_USERINFO_URL: str = Field(
+        default="https://huggingface.co/oauth/userinfo",
+        description="Hugging Face OpenID Connect userinfo endpoint.",
+    )
+
+    FRONTEND_URL: str = Field(
+        default="http://localhost:3000",
+        description="Base URL of the Vercel frontend; users are redirected here after login.",
+    )
+
+    DATABASE_URL: str = Field(
+        default_factory=lambda: str(PROJECT_ROOT / "data" / "avatar_app.sqlite3"),
+        description=(
+            "Filesystem path to the SQLite database. On a HF Space, point this at "
+            "persistent storage (e.g. /data/avatar_app.sqlite3) so users/sessions survive restarts."
+        ),
+    )
+
+    SESSION_SECRET: str = Field(
+        default="change-me",
+        description="Secret used to sign OAuth CSRF state. Set a strong random value in production.",
+    )
+
+    SESSION_TTL_HOURS: int = Field(
+        default=168,  # 7 days
+        description="Lifetime of an issued app session token, in hours.",
+        ge=1,
+    )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # CORS (browser frontend access)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    CORS_ALLOW_ORIGINS: str = Field(
+        default="http://localhost:3000,http://localhost:3001",
+        description=(
+            "Comma-separated list of allowed CORS origins, or '*' for any origin. "
+            "Credentials are only enabled when explicit origins are listed "
+            "(the CORS spec forbids '*' together with credentials)."
+        ),
+    )
+
+    CORS_ALLOW_ORIGIN_REGEX: Optional[str] = Field(
+        default=r"https://.*\.vercel\.app",
+        description=(
+            "Optional regex matching additional allowed origins "
+            "(e.g. Vercel preview deployments). Set empty to disable."
+        ),
+    )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Cloud Object Storage (S3 / IBM COS) — optional result upload
+    # ─────────────────────────────────────────────────────────────────────────
+
+    COS_BUCKET: Optional[str] = Field(
+        default=None,
+        description=(
+            "Target bucket for rendered video upload. If empty, results stay on "
+            "local/PVC storage and no upload is attempted."
+        ),
+    )
+
+    COS_ENDPOINT_URL: Optional[str] = Field(
+        default=None,
+        description=(
+            "S3-compatible endpoint URL (e.g. IBM COS 's3.us-south.cloud-object-storage.appdomain.cloud'). "
+            "Leave empty to use AWS S3 defaults."
+        ),
+    )
+
+    COS_REGION: Optional[str] = Field(
+        default=None,
+        description="Region name for the object storage service (e.g. 'us-south', 'us-east-1').",
+    )
+
+    COS_PUBLIC_BASE_URL: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional public base URL used to build the returned object URL "
+            "(e.g. a CDN domain). Falls back to the endpoint/bucket form when unset."
+        ),
+    )
+
+    # ─────────────────────────────────────────────────────────────────────────
     # FFmpeg Configuration
     # ─────────────────────────────────────────────────────────────────────────
 

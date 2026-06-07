@@ -23,6 +23,9 @@ import {
   Trash,
 } from 'lucide-react';
 
+import HuggingFaceLogin from '../components/HuggingFaceLogin';
+import { authHeaders } from '../lib/api';
+
 const API_BASE = process.env.NEXT_PUBLIC_AVATAR_API_BASE || 'http://localhost:8000';
 
 const AVATARS = [
@@ -128,8 +131,13 @@ export default function Page() {
     try {
       const res = await fetch(`${API_BASE}/render-upload`, {
         method: 'POST',
+        headers: authHeaders(),
         body: fd,
       });
+
+      if (res.status === 401) {
+        throw new Error('Please sign in with Hugging Face before rendering.');
+      }
 
       if (!res.ok) {
         throw new Error(`Upload failed: ${res.status}`);
@@ -164,7 +172,7 @@ export default function Page() {
     }, 1000);
 
     for (let i = 0; i < 300; i++) {
-      const r = await fetch(`${API_BASE}/status/${id}`);
+      const r = await fetch(`${API_BASE}/status/${id}`, { headers: authHeaders() });
 
       const ct = r.headers.get('content-type') || '';
       if (r.ok && ct.includes('video/mp4')) {
@@ -255,12 +263,15 @@ export default function Page() {
             </button>
           </div>
 
-          <button
-            onClick={() => scrollToSection('demo')}
-            className="px-6 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 rounded-lg font-medium hover:from-cyan-500 hover:to-blue-500 transition-all glow-effect"
-          >
-            Get Started
-          </button>
+          <div className="flex items-center gap-4">
+            <HuggingFaceLogin />
+            <button
+              onClick={() => scrollToSection('demo')}
+              className="px-6 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 rounded-lg font-medium hover:from-cyan-500 hover:to-blue-500 transition-all glow-effect"
+            >
+              Get Started
+            </button>
+          </div>
         </div>
       </nav>
 

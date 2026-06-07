@@ -36,8 +36,8 @@ def _patch_pipeline(monkeypatch):
     empty MP4 so the API flow can complete instantly.
     """
 
-    def _fake_pipeline(*, face_image, audio, out_path, reference_video=None,
-                      viseme_json=None, quality_mode="auto"):
+    def _fake_pipeline(*, face_image, audio, out_path, **_kwargs):
+        # Accept any extra kwargs (enhancements, transcript, …) the API forwards.
         # write a trivial MP4 header so FFmpeg players don't choke
         TMP_OUT.write_bytes(b"\x00" * 1024)
         Path(out_path).write_bytes(TMP_OUT.read_bytes())
