@@ -188,7 +188,10 @@ def build_ui() -> gr.Blocks:
                     audio = gr.Audio(type="filepath", label="Audio (used if no text above)")
 
                 quality = gr.Dropdown(
-                    choices=["auto", "real_time", "high_quality"], value="auto", label="Quality mode"
+                    choices=["preview", "real_time", "standard", "high_quality", "premium", "cinematic", "auto"],
+                    value="standard",
+                    label="Quality tier",
+                    info="Strict tiers (high_quality/premium/cinematic) never deliver a degraded fallback.",
                 )
                 method = gr.Dropdown(
                     choices=METHOD_CHOICES, value="wav2lip_gfpgan", label="Generation method",
