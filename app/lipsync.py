@@ -133,6 +133,7 @@ def wav2lip_render(*, face_image: str, audio: str, out_path: str) -> str:
     if full is None:
         raise RuntimeError(f"Could not read image: {face_image}")
     x1, y1, x2, y2 = _detect_face_box(full)
+    log.info("Face box: (%d,%d,%d,%d) of image %dx%d", x1, y1, x2, y2, full.shape[1], full.shape[0])
     face = full[y1:y2, x1:x2]
     face_resized = cv2.resize(face, (IMG_SIZE, IMG_SIZE))
 
@@ -168,11 +169,12 @@ def wav2lip_render(*, face_image: str, audio: str, out_path: str) -> str:
 
     batch = 64
     written = 0
+    # Wav2Lip channel order is [masked, reference] (lower half of the masked copy
+    # is zeroed; the model inpaints the mouth from the audio).
+    face6 = np.concatenate([img_masked, face_resized], axis=2)
     for b in range(0, len(mel_chunks), batch):
         chunk = mel_chunks[b:b + batch]
-        img_in = np.concatenate(
-            [np.concatenate([face_resized, img_masked], axis=2)[None]] * len(chunk), axis=0
-        ) / 255.0
+        img_in = np.concatenate([face6[None]] * len(chunk), axis=0) / 255.0
         mel_in = np.array([m for m in chunk])[..., None]
         img_t = torch.FloatTensor(np.transpose(img_in, (0, 3, 1, 2))).to(device)
         mel_t = torch.FloatTensor(np.transpose(mel_in, (0, 3, 1, 2))).to(device)

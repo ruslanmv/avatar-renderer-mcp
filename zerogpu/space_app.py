@@ -19,10 +19,14 @@ The file is named `space_app.py` (not `app.py`) on purpose: the repo ships an
 
 from __future__ import annotations
 
+import logging
 import os
 import tempfile
 import uuid
 from pathlib import Path
+
+# Surface app render-path logs (otherwise INFO from our modules is suppressed).
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
 import gradio as gr
 
