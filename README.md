@@ -86,6 +86,7 @@ The **Auto** mode (default) picks the right one for you.
 
 ## Generation Methods — Quality Comparison
 
+<!-- COMPARISON:START -->
 All variants generated from the **same portrait + same text** on the live
 [ZeroGPU Space](https://huggingface.co/spaces/ruslanmv/avatar-renderer). Samples
 hosted on the [comparison dataset](https://huggingface.co/datasets/ruslanmv/avatar-renderer-samples).
@@ -101,7 +102,7 @@ alternative anti-flicker compositing (mouth band on a static base).
 | No lip-sync (static) | Full-face, no restore | Full-face + GFPGAN | Mouth-band, static base | + head motion, static bg |
 | [mp4](https://huggingface.co/datasets/ruslanmv/avatar-renderer-samples/resolve/main/simple.mp4) | [mp4](https://huggingface.co/datasets/ruslanmv/avatar-renderer-samples/resolve/main/wav2lip.mp4) | [mp4](https://huggingface.co/datasets/ruslanmv/avatar-renderer-samples/resolve/main/wav2lip_gfpgan.mp4) | [mp4](https://huggingface.co/datasets/ruslanmv/avatar-renderer-samples/resolve/main/wav2lip_band.mp4) | [mp4](https://huggingface.co/datasets/ruslanmv/avatar-renderer-samples/resolve/main/fullface.mp4) |
 
-**Objective metrics** (measured on the rendered frames, ZeroGPU A10G):
+**Objective metrics** (measured on the rendered frames):
 
 | Method | Mouth sharpness ↑ | Lip motion ↑ | Face flicker ↓ | Background motion ↓ |
 |---|---:|---:|---:|---:|
@@ -110,6 +111,11 @@ alternative anti-flicker compositing (mouth band on a static base).
 | **`wav2lip_gfpgan`** ⭐ | **45.4** | 5.13 | 1.81 | 0.00 |
 | `wav2lip_band` | 37.6 | 4.89 | **0.05** | 0.00 |
 | `fullface` | 27.6 | 5.02 | 0.85 (head motion) | 0.07 |
+<!-- COMPARISON:END -->
+
+> Regenerate this section on a GPU box: `scripts/regen_comparison.sh`
+> (renders every available engine, computes metrics, builds GIFs, uploads to the
+> dataset, and rewrites the block above). See the script header for options.
 
 **Verdict**
 - 🏆 **`wav2lip_gfpgan` — best overall (restored original):** faithful dev-v0.1.25 full-face pipeline — the most natural, sharp talking mouth (≈3.5× sharper than raw Wav2Lip), untouched background. The default for `standard`/`high_quality`.
