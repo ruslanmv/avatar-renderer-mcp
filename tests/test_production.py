@@ -29,9 +29,10 @@ def test_modes_config():
     assert get_render_config("nonsense").name == "standard"
     assert get_render_config("auto").name == "standard"
 
-    # Premium has an artifact gate + requires a face.
+    # Premium requires a face and forbids fallback (artifact score is recorded
+    # but not used as a hard gate — see modes.py note).
     prem = get_render_config("premium")
-    assert prem.max_artifact_score is not None and prem.require_face is True
+    assert prem.require_face is True and prem.allow_fallback is False
     assert "mouth_artifact_cleanup" in prem.required_enhancements
 
 

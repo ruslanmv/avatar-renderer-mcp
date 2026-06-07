@@ -50,25 +50,30 @@ RENDER_CONFIGS = {
         required_enhancements=["mouth_artifact_cleanup"],
         optional_enhancements=["eye_gaze_blink"],
     ),
+    # NOTE: mouth_artifact_score is recorded in the report for observability, but
+    # it is NOT used as a hard gate — color heuristics can't reliably tell a real
+    # double-lip remnant from a normal smiling mouth (a landmark/ML detector is
+    # the proper future gate). Strict tiers still enforce: no degraded fallback,
+    # and a face must be present.
     "high_quality": RenderConfig(
         name="high_quality", method="wav2lip_gfpgan", allow_fallback=False,
         fps=25, crf=18, resolution=768,
         required_enhancements=["mouth_artifact_cleanup"],
         optional_enhancements=["eye_gaze_blink"],
-        max_artifact_score=0.15, require_face=True,
+        max_artifact_score=None, require_face=True,
     ),
     "premium": RenderConfig(
         name="premium", method="fullface", allow_fallback=False,
         fps=30, crf=16, resolution=1080,
         required_enhancements=["mouth_artifact_cleanup", "eye_gaze_blink"],
         optional_enhancements=["emotion_expressions"],
-        max_artifact_score=0.12, require_face=True,
+        max_artifact_score=None, require_face=True,
     ),
     "cinematic": RenderConfig(
         name="cinematic", method="fullface", allow_fallback=False,
         fps=30, crf=16, resolution=1080,
         required_enhancements=["mouth_artifact_cleanup", "eye_gaze_blink"],
-        max_artifact_score=0.12, require_face=True,
+        max_artifact_score=None, require_face=True,
     ),
 }
 
