@@ -2,43 +2,52 @@
 space_app.py — Avatar Renderer · ZeroGPU Gradio Space
 =====================================================
 
-This is the Hugging Face Space entry point (app_file in README.md). It runs as a
-Gradio SDK Space on ZeroGPU hardware:
+Hugging Face Space entry point (app_file in README.md), running on ZeroGPU:
 
-  • `generate()` is decorated with `@spaces.GPU`, so ZeroGPU attaches a GPU for
-    the duration of each inference call.
-  • Inference reuses the repo pipeline via `app.render.render`, which tries the
-    full GPU lip-sync pipeline and gracefully falls back to the ffmpeg renderer
-    so a video is ALWAYS returned (the Space never hard-fails).
-  • A named API endpoint (api_name="predict") is exposed so the Vercel frontend
-    can run inferences via @gradio/client.
+  • Text-to-speech (edge-tts): type text + pick a voice/speed/pitch and the Space
+    synthesizes the audio, OR upload your own audio.
+  • Lip-sync render reuses app.render.render (in-process Wav2Lip + GFPGAN, with a
+    safe ffmpeg fallback) inside the @spaces.GPU allocation.
+  • Optional naturalness add-ons (head motion, blink/gaze) you can toggle to
+    compare more vs. less robotic results.
+  • Named API endpoint (api_name="predict") for the Vercel frontend via
+    @gradio/client.
 
-The file is named `space_app.py` (not `app.py`) on purpose: the repo ships an
-`app/` Python package, and a same-named `app.py` at the root would shadow it.
+Named space_app.py (not app.py) so it doesn't shadow the repo's app/ package.
 """
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 import tempfile
 import uuid
 from pathlib import Path
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+log = logging.getLogger("space_app")
+
 import gradio as gr
 
 from app.render import render  # lazy/heavy imports happen inside render()
+
+# Pre-fetch Wav2Lip code + weights at startup (outside the GPU window).
+try:
+    from app.lipsync import ensure_setup
+
+    ensure_setup()
+except Exception:
+    pass
 
 _OUT_DIR = Path(tempfile.gettempdir()) / "zerogpu-jobs"
 _OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 GPU_DURATION = int(os.getenv("ZEROGPU_DURATION", "120"))
 
-# Use the real ZeroGPU decorator only on actual ZeroGPU hardware (env set by HF).
-# On cpu-basic (e.g. while waiting for a ZeroGPU slot) it is a no-op, so the app
-# still runs and serves the ffmpeg fallback instead of crashing.
 _ON_ZEROGPU = os.environ.get("SPACES_ZERO_GPU", "").lower() in ("true", "1")
 if _ON_ZEROGPU:
-    import spaces  # provided by the ZeroGPU runtime
+    import spaces
 
     def gpu(fn):
         return spaces.GPU(duration=GPU_DURATION)(fn)
@@ -47,37 +56,98 @@ else:
         return fn
 
 
+# Naturalness add-ons — (label shown in UI, enhancement id sent to backend).
+# Tuple choices make the CheckboxGroup accept ids over the API too.
+ADDON_CHOICES = [
+    ("Head motion (breathing/sway)", "gesture_animation"),
+    ("Eye blink & gaze", "eye_gaze_blink"),
+    ("Emotion analysis", "emotion_expressions"),
+]
+
+# Curated edge-tts neural voices (label, voice id) across languages.
+VOICE_CHOICES = [
+    ("English (US) — Aria, female", "en-US-AriaNeural"),
+    ("English (US) — Guy, male", "en-US-GuyNeural"),
+    ("English (UK) — Sonia, female", "en-GB-SoniaNeural"),
+    ("English (UK) — Ryan, male", "en-GB-RyanNeural"),
+    ("Spanish (ES) — Elvira, female", "es-ES-ElviraNeural"),
+    ("Spanish (MX) — Jorge, male", "es-MX-JorgeNeural"),
+    ("French — Denise, female", "fr-FR-DeniseNeural"),
+    ("German — Katja, female", "de-DE-KatjaNeural"),
+    ("Italian — Elsa, female", "it-IT-ElsaNeural"),
+    ("Portuguese (BR) — Francisca, female", "pt-BR-FranciscaNeural"),
+    ("Hindi — Swara, female", "hi-IN-SwaraNeural"),
+    ("Chinese — Xiaoxiao, female", "zh-CN-XiaoxiaoNeural"),
+    ("Japanese — Nanami, female", "ja-JP-NanamiNeural"),
+    ("Arabic — Salma, female", "ar-EG-SalmaNeural"),
+    ("Russian — Svetlana, female", "ru-RU-SvetlanaNeural"),
+]
+_DEFAULT_VOICE = "en-US-AriaNeural"
+
+
+def synthesize_tts(text: str, voice: str, speed_pct: int, pitch_hz: int) -> str:
+    """Convert text to an MP3 with edge-tts; returns the file path."""
+    import edge_tts
+
+    out = str(_OUT_DIR / f"tts_{uuid.uuid4()}.mp3")
+    rate = f"{int(speed_pct):+d}%"
+    pitch = f"{int(pitch_hz):+d}Hz"
+
+    async def _go():
+        comm = edge_tts.Communicate(text, voice or _DEFAULT_VOICE, rate=rate, pitch=pitch)
+        await comm.save(out)
+
+    asyncio.run(_go())
+    log.info("TTS: %d chars, voice=%s, rate=%s, pitch=%s -> %s", len(text), voice, rate, pitch, out)
+    return out
+
+
 @gpu
-def generate(image_path: str, audio_path: str, quality_mode: str = "auto") -> str:
-    """Generate a talking-avatar video on GPU and return the output file path.
-
-    Runs inside ZeroGPU's GPU allocation. `render()` selects the full ML pipeline
-    when models + CUDA are available, otherwise the ffmpeg fallback.
-    """
-    if not image_path or not audio_path:
-        raise gr.Error("Please provide both a portrait image and an audio file.")
-
+def _gpu_render(image_path: str, audio_path: str, addons) -> str:
+    """GPU-allocated render (Wav2Lip + GFPGAN + add-ons)."""
     out_path = str(_OUT_DIR / f"{uuid.uuid4()}.mp4")
+    return render(
+        face_image=image_path,
+        audio=audio_path,
+        out_path=out_path,
+        enhancements=(addons or None),
+    )
+
+
+def generate(image_path, audio_path, text, voice, speed, pitch, quality_mode, addons):
+    """UI/API handler: optional TTS from text, then GPU lip-sync render.
+
+    Audio source: if `text` is provided it is synthesized (edge-tts) and used;
+    otherwise the uploaded `audio_path` is used. TTS runs outside the GPU window.
+    """
+    if not image_path:
+        raise gr.Error("Please provide a portrait image.")
+
+    if text and text.strip():
+        try:
+            audio_path = synthesize_tts(text.strip(), voice, speed or 0, pitch or 0)
+        except Exception as exc:
+            raise gr.Error(f"Text-to-speech failed: {exc}") from exc
+
+    if not audio_path:
+        raise gr.Error("Type some text to speak, or upload an audio file.")
+
+    # Map any labels to ids (defensive — tuple choices already send ids).
+    label_to_id = {label: eid for label, eid in ADDON_CHOICES}
+    addons = [label_to_id.get(a, a) for a in (addons or [])]
+
     try:
-        return render(
-            face_image=image_path,
-            audio=audio_path,
-            out_path=out_path,
-            quality_mode=quality_mode or "auto",
-        )
-    except Exception as exc:  # surface a clean error in the UI/API
+        return _gpu_render(image_path, audio_path, addons)
+    except Exception as exc:
         raise gr.Error(f"Rendering failed: {exc}") from exc
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# UI
-# ──────────────────────────────────────────────────────────────────────────────
 _DESCRIPTION = """
 # 🎭 Avatar Renderer — ZeroGPU
-Turn a **portrait photo** + an **audio clip** into a talking-avatar video.
-Runs on Hugging Face **ZeroGPU**. Also callable as an API from the web app.
+Turn a **portrait photo** into a talking-avatar video. **Type text** (synthesized
+to speech) or **upload audio**. Toggle the naturalness add-ons to compare results.
+Runs on Hugging Face **ZeroGPU**; also callable as an API from the web app.
 """
-
 
 _HERE = Path(__file__).resolve().parent
 _DEMO_VIDEO = str(_HERE / "assets" / "demo.mp4")
@@ -92,32 +162,50 @@ def build_ui() -> gr.Blocks:
         with gr.Row():
             with gr.Column(scale=1):
                 image = gr.Image(type="filepath", label="Portrait image")
-                audio = gr.Audio(type="filepath", label="Audio")
+
+                with gr.Tab("Type text (TTS)"):
+                    text = gr.Textbox(
+                        label="Text to speak",
+                        placeholder="Hello! I'm your AI avatar.",
+                        lines=3,
+                    )
+                    voice = gr.Dropdown(choices=VOICE_CHOICES, value=_DEFAULT_VOICE, label="Voice")
+                    with gr.Row():
+                        speed = gr.Slider(-50, 50, value=0, step=5, label="Speed %")
+                        pitch = gr.Slider(-20, 20, value=0, step=2, label="Pitch (Hz)")
+                with gr.Tab("Upload audio"):
+                    audio = gr.Audio(type="filepath", label="Audio (used if no text above)")
+
                 quality = gr.Dropdown(
-                    choices=["auto", "real_time", "high_quality"],
-                    value="auto",
-                    label="Quality mode",
+                    choices=["auto", "real_time", "high_quality"], value="auto", label="Quality mode"
+                )
+                addons = gr.CheckboxGroup(
+                    choices=ADDON_CHOICES,
+                    value=[],
+                    label="Naturalness add-ons (toggle to compare)",
+                    info="Subtle head motion, blinking and gaze to look less robotic.",
                 )
                 btn = gr.Button("Generate video", variant="primary")
             with gr.Column(scale=1):
-                # Pre-loaded so visitors see a sample result the moment they open
-                # the Space (without spending any GPU quota).
                 out = gr.Video(
                     label="Result (sample shown — generate your own on the left)",
                     value=_DEMO_VIDEO if Path(_DEMO_VIDEO).exists() else None,
                     autoplay=True,
                 )
 
-        # One-click example using bundled sample inputs.
         if Path(_EX_IMAGE).exists() and Path(_EX_AUDIO).exists():
             gr.Examples(
-                examples=[[_EX_IMAGE, _EX_AUDIO, "auto"]],
-                inputs=[image, audio, quality],
-                label="Try this example",
+                examples=[[_EX_IMAGE, "Hello! Welcome to the avatar renderer demo.", _DEFAULT_VOICE]],
+                inputs=[image, text, voice],
+                label="Try this example (text-to-speech)",
             )
 
-        # Named endpoint for @gradio/client (the Vercel frontend calls "/predict").
-        btn.click(generate, inputs=[image, audio, quality], outputs=out, api_name="predict")
+        btn.click(
+            generate,
+            inputs=[image, audio, text, voice, speed, pitch, quality, addons],
+            outputs=out,
+            api_name="predict",
+        )
 
     return demo
 
