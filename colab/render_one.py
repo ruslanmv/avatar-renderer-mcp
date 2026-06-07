@@ -56,9 +56,19 @@ def main() -> int:
 
     from app.render import orchestrate  # heavy import after paths are set
 
+    # Normalize audio to PCM WAV. Pipeline engines (FOMM's wrapper) read the audio
+    # with wave.open(), which rejects mp3 ("file does not start with RIFF id").
+    import subprocess
+    audio = args.audio
+    if not audio.lower().endswith(".wav"):
+        wav = str(Path(args.out).with_suffix("")) + ".in.wav"
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", audio,
+                        "-ar", "16000", "-ac", "1", wav], check=True)
+        audio = wav
+
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     out = orchestrate(
-        face_image=args.image, audio=args.audio, out_path=args.out,
+        face_image=args.image, audio=audio, out_path=args.out,
         quality_mode=args.quality, engine=args.engine, commercial=args.commercial,
     )
     size = Path(out).stat().st_size if Path(out).exists() else 0
