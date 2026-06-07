@@ -53,6 +53,9 @@ def _good_box(frames):
 
 
 def measure(mp4: str, work: Path) -> dict:
+    """Framing-robust metrics. The mouth ROI is AUTO-LOCATED as the peak of
+    temporal motion in the lower-central face — so it works regardless of the
+    engine's output resolution/crop (e.g. FOMM's 512 vs Wav2Lip's 768)."""
     import cv2
     import numpy as np
 
@@ -64,24 +67,40 @@ def measure(mp4: str, work: Path) -> dict:
     if not files:
         return {"frames": 0}
     col = [cv2.imread(f) for f in files]
-    gray = [cv2.cvtColor(c, cv2.COLOR_BGR2GRAY).astype("int16") for c in col]
-    x, y, x2, y2 = _good_box(col)
-    fw, fh = x2 - x, y2 - y
+    gray = [cv2.cvtColor(c, cv2.COLOR_BGR2GRAY).astype("float32") for c in col]
     n = len(gray)
+    H, W = gray[0].shape
 
-    def region_motion(a, b, ry1, ry2, rx1, rx2):
-        return float(np.abs(gray[a][ry1:ry2, rx1:rx2] - gray[b][ry1:ry2, rx1:rx2]).mean())
+    # Temporal motion accumulator (mean |Δframe|).
+    acc = np.zeros((H, W), np.float32)
+    for i in range(n - 1):
+        acc += np.abs(gray[i + 1] - gray[i])
+    if n > 1:
+        acc /= (n - 1)
 
-    mouth = lambda i, j: region_motion(i, j, y + int(fh * .62), y + int(fh * .92), x + int(fw * .20), x + int(fw * .80))
-    face = lambda i, j: region_motion(i, j, y + int(fh * .10), y + int(fh * .45), x + int(fw * .20), x + int(fw * .80))
-    bg = lambda i, j: region_motion(i, j, 5, min(110, gray[0].shape[0]), 5, min(110, gray[0].shape[1]))
+    # Locate the mouth = motion peak within the lower-central face.
+    ys, ye, xs, xe = int(0.45 * H), int(0.92 * H), int(0.22 * W), int(0.78 * W)
+    sub = acc[ys:ye, xs:xe]
+    if sub.size and float(sub.max()) > 1e-3:
+        blur = cv2.GaussianBlur(sub, (0, 0), sigmaX=max(2.0, W * 0.02))
+        my, mx = np.unravel_index(int(np.argmax(blur)), blur.shape)
+        cy, cx = ys + my, xs + mx
+    else:  # static clip (e.g. `simple`): no motion to lock onto
+        cy, cx = int(0.70 * H), W // 2
+    bw, bh = int(0.22 * W), int(0.12 * H)
+    rx1, ry1 = max(0, cx - bw // 2), max(0, cy - bh // 2)
+    rx2, ry2 = min(W, cx + bw // 2), min(H, cy + bh // 2)
 
-    mm = float(np.mean([mouth(i, i + 1) for i in range(n - 1)])) if n > 1 else 0.0
-    ff = float(np.mean([face(i, i + 1) for i in range(n - 1)])) if n > 1 else 0.0
-    bb = float(np.mean([bg(i, i + 1) for i in range(n - 1)])) if n > 1 else 0.0
-    mid = col[n // 2]
-    roi = mid[y + int(fh * .60):y + int(fh * .90), x + int(fw * .20):x + int(fw * .80)]
-    sharp = float(cv2.Laplacian(cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY), cv2.CV_64F).var()) if roi.size else 0.0
+    mm = float(acc[ry1:ry2, rx1:rx2].mean())                       # mouth motion
+    mid = col[n // 2][ry1:ry2, rx1:rx2]
+    sharp = float(cv2.Laplacian(cv2.cvtColor(mid, cv2.COLOR_BGR2GRAY), cv2.CV_64F).var()) if mid.size else 0.0
+
+    # Face flicker: upper-central (forehead/eyes) frame-to-frame change.
+    fy1, fy2, fx1, fx2 = int(0.15 * H), int(0.42 * H), int(0.30 * W), int(0.70 * W)
+    ff = float(acc[fy1:fy2, fx1:fx2].mean())
+    # Background motion: top-left corner.
+    bb = float(acc[0:max(8, int(0.12 * H)), 0:max(8, int(0.12 * W))].mean())
+
     return {"frames": n, "mouth_sharpness": round(sharp, 1), "mouth_motion": round(mm, 3),
             "face_flicker": round(ff, 3), "bg_motion": round(bb, 3)}
 
