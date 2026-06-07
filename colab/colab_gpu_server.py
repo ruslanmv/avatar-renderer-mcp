@@ -34,9 +34,18 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, Form, Header, HTTPException, UploadFile, File
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
+
+# python-multipart is only needed for the optional file-upload endpoint. FastAPI
+# raises at import time if you register a File()/Form() route without it, so we
+# register /upload conditionally — the server still boots if it's missing.
+try:
+    import multipart  # noqa: F401  (python-multipart)
+    _HAS_MULTIPART = True
+except Exception:
+    _HAS_MULTIPART = False
 
 # ── Config (from env, set by the notebook) ───────────────────────────────────
 REPO_DIR = Path(os.environ.get("REPO_DIR", "/content/work/avatar-renderer-mcp"))
@@ -312,14 +321,17 @@ def render_sample(req: RenderReq, x_colab_token: Optional[str] = Header(None)):
     return {"job_id": job["job_id"], "status": "running", "expected_artifact": out_name}
 
 
-@app.post("/upload")
-async def upload(file: UploadFile = File(...),
-                 x_colab_token: Optional[str] = Header(None)):
-    _auth(x_colab_token)
-    name = _safe_name(file.filename or f"upload_{uuid.uuid4().hex[:6]}")
-    dst = INPUT_DIR / name
-    dst.write_bytes(await file.read())
-    return {"ok": True, "name": name, "bytes": dst.stat().st_size}
+if _HAS_MULTIPART:
+    from fastapi import File, UploadFile
+
+    @app.post("/upload")
+    async def upload(file: UploadFile = File(...),
+                     x_colab_token: Optional[str] = Header(None)):
+        _auth(x_colab_token)
+        name = _safe_name(file.filename or f"upload_{uuid.uuid4().hex[:6]}")
+        dst = INPUT_DIR / name
+        dst.write_bytes(await file.read())
+        return {"ok": True, "name": name, "bytes": dst.stat().st_size}
 
 
 @app.get("/jobs/{jid}")
