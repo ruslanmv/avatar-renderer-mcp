@@ -22,17 +22,26 @@ from pathlib import Path
 
 def _setup_engine_paths() -> None:
     """Point MODEL_ROOT / EXT_DEPS_DIR / sys.path at the cloned engine repos so
-    the engine-registry availability probes succeed."""
+    the engine-registry availability probes succeed.
+
+    Critical: the repo root must take PRECEDENCE over the engine repos — several
+    of them ship top-level modules that collide with ours (e.g. MuseTalk/app.py
+    would otherwise shadow this project's `app` package). So engine dirs are
+    appended (low priority) and the repo root is forced to the front.
+    """
     repo = Path(os.environ.get("REPO_DIR", Path(__file__).resolve().parents[1]))
     model_root = os.environ.setdefault("MODEL_ROOT", str(repo / "models"))
     ext = os.environ.setdefault("EXT_DEPS_DIR", str(repo / "external_deps"))
     subs = ["first-order-model", "Wav2Lip", "SadTalker", "Diff2Lip",
             "guided-diffusion", "MuseTalk", "LatentSync"]
-    paths = [str(repo)] + [f"{ext}/{s}" for s in subs]
-    for p in paths:
-        if p not in sys.path:
-            sys.path.insert(0, p)
-    os.environ["PYTHONPATH"] = ":".join(paths)
+    for s in subs:
+        p = f"{ext}/{s}"
+        if os.path.isdir(p) and p not in sys.path:
+            sys.path.append(p)            # engine repos: lowest precedence
+    if str(repo) in sys.path:
+        sys.path.remove(str(repo))
+    sys.path.insert(0, str(repo))         # the repo's own `app` package wins
+    os.environ["PYTHONPATH"] = ":".join([str(repo)] + [f"{ext}/{s}" for s in subs])
     os.environ.setdefault("LIPSYNC_HF_REPO", "ruslanmv/avatar-renderer")
     _ = model_root  # documented side effect
 

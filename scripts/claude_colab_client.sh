@@ -32,7 +32,7 @@ case "$method" in
   GET)
     curl -sS "${H_AUTH[@]}" "${COLAB_GPU_URL}${1}" ;;
   POST)
-    endpoint="$1"; payload="${2:-{}}"
+    endpoint="$1"; payload="${2:-}"; [ -n "$payload" ] || payload='{}'
     curl -sS -X POST "${COLAB_GPU_URL}${endpoint}" "${H_AUTH[@]}" "${H_JSON[@]}" -d "${payload}" ;;
   DOWNLOAD)
     endpoint="$1"; outfile="${2:?provide an output file path}"
