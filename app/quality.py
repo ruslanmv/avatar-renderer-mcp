@@ -136,14 +136,20 @@ def mouth_artifact_score(frames, face_box=None) -> float:
             continue
         hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
         v = hsv[:, :, 2]
-        dark = (v < max(60, int(np.percentile(v, 35))))
-        if float(dark.mean()) < 0.06:
-            continue  # mouth closed
-        reddish = cv2.inRange(hsv, np.array([0, 35, 60]), np.array([22, 190, 200])) > 0
-        inside = cv2.dilate(dark.astype("uint8") * 255, np.ones((9, 9), "uint8")) > 0
-        artifact = (reddish & inside)
-        cav = max(1, int(dark.sum()))
-        scores.append(float(artifact.sum()) / cav)
+        dark = (v < max(55, int(np.percentile(v, 30)))).astype("uint8") * 255
+        if float((dark > 0).mean()) < 0.08:
+            continue  # mouth closed → not measured
+        # Remnant = reddish pixels STRICTLY INSIDE the cavity (eroded core), so
+        # normal lips at the cavity boundary are NOT counted. Score is the
+        # fraction of the cavity core that looks like a stray lip/skin blob (0..1).
+        core = cv2.erode(dark, np.ones((7, 7), "uint8")) > 0
+        core_n = int(core.sum())
+        if core_n < 20:
+            continue
+        reddish = cv2.inRange(hsv, np.array([0, 40, 70]), np.array([18, 170, 180])) > 0
+        reddish |= cv2.inRange(hsv, np.array([165, 40, 70]), np.array([180, 170, 180])) > 0
+        artifact = reddish & core
+        scores.append(min(1.0, float(artifact.sum()) / core_n))
     return round(float(sum(scores) / len(scores)), 4) if scores else 0.0
 
 
