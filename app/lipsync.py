@@ -148,7 +148,9 @@ def _load_model(ckpt: Path, device: str):
     return model.to(device).eval()
 
 
-def wav2lip_render(*, face_image: str, audio: str, out_path: str) -> str:
+def wav2lip_render(
+    *, face_image: str, audio: str, out_path: str, enhancements: "list | None" = None
+) -> str:
     """Render a lip-synced talking-face MP4. Raises on failure (caller falls back)."""
     import cv2
     import numpy as np
@@ -216,6 +218,17 @@ def wav2lip_render(*, face_image: str, audio: str, out_path: str) -> str:
         mel_chunks.append(mel[:, start:start + MEL_STEP_SIZE])
         i += 1
 
+    # Per-frame silence gating: freeze the mouth (keep the original resting face)
+    # during quiet frames, so the mouth doesn't keep moving when there's no speech.
+    spf = 16000.0 / FPS
+    rms = []
+    for i in range(len(mel_chunks)):
+        seg = wav[int(i * spf):int((i + 1) * spf)]
+        rms.append(float(np.sqrt(np.mean(seg ** 2))) if len(seg) else 0.0)
+    peak = max(rms) if rms else 0.0
+    sil_thr = peak * 0.12
+    silent = [r < sil_thr for r in rms] if peak > 0 else [False] * len(mel_chunks)
+
     model = _load_model(ckpt, device)
     restorer = _get_gfpgan(device) if os.getenv("LIPSYNC_GFPGAN", "1") == "1" else None
 
@@ -251,9 +264,10 @@ def wav2lip_render(*, face_image: str, audio: str, out_path: str) -> str:
         pred = pred.cpu().numpy().transpose(0, 2, 3, 1) * 255.0
         for p in pred:
             gen = cv2.resize(p.astype(np.uint8), (bw, bh)).astype(np.float32)
-            blended = orig_region * (1.0 - blend_mask) + gen * blend_mask
             frame = full.copy()
-            frame[y1:y2, x1:x2] = blended.astype(np.uint8)
+            if not (written < len(silent) and silent[written]):
+                blended = orig_region * (1.0 - blend_mask) + gen * blend_mask
+                frame[y1:y2, x1:x2] = blended.astype(np.uint8)
             if restorer is not None:
                 try:
                     _, _, frame = restorer.enhance(
@@ -263,17 +277,38 @@ def wav2lip_render(*, face_image: str, audio: str, out_path: str) -> str:
                     if written == 0:
                         log.warning("GFPGAN enhance failed (%s); using unrestored frames.", exc)
                     restorer = None
-            cv2.imwrite(str(frames_dir / f"{written:05d}.jpg"), frame)
+            cv2.imwrite(str(frames_dir / f"{written:05d}.png"), frame)
             written += 1
 
     if written == 0:
         raise RuntimeError("Wav2Lip produced no frames.")
 
+    # Optional naturalness add-ons (eye blink/gaze, head motion, emotion) applied
+    # as frame post-processing so users can toggle and compare them.
+    final_dir = frames_dir
+    if enhancements:
+        try:
+            from .enhancements import EnhancementContext, registry
+
+            ctx = EnhancementContext(
+                face_image=face_image, audio_path=audio_for_mux,
+                frames_dir=frames_dir, tmp_dir=tmp, fps=FPS, device=device,
+            )
+            enabled = set(enhancements)
+            ctx = registry.apply_stage(ctx, "pre_motion", enabled)
+            ctx = registry.apply_stage(ctx, "post_process", enabled)
+            if ctx.frames_dir and ctx.frames_dir.exists():
+                final_dir = ctx.frames_dir
+            if ctx.applied_enhancements:
+                log.info("Applied add-ons: %s", ", ".join(ctx.applied_enhancements))
+        except Exception as exc:
+            log.warning("Add-on enhancements failed (%s); using base frames.", exc)
+
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         [
             "ffmpeg", "-y", "-loglevel", "error",
-            "-framerate", str(FPS), "-i", str(frames_dir / "%05d.jpg"),
+            "-framerate", str(FPS), "-i", str(final_dir / "%05d.png"),
             "-i", audio_for_mux,
             "-map", "0:v:0", "-map", "1:a:0",
             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20",

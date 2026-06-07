@@ -140,6 +140,7 @@ export default function Page() {
         audioFile,
         qualityMode,
         getHfToken() ?? undefined,
+        enabledEnhancements,
       );
       clearInterval(stepInterval);
       setVideoUrl(url);

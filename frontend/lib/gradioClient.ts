@@ -22,14 +22,15 @@ export async function generateAvatar(
   audio: File | Blob,
   qualityMode = 'auto',
   hfToken?: string,
+  enhancements: string[] = [],
 ): Promise<string> {
   const client = await Client.connect(
     HF_SPACE,
     hfToken ? { hf_token: hfToken as `hf_${string}` } : undefined,
   );
 
-  // Positional args match space_app.generate(image_path, audio_path, quality_mode)
-  const result: any = await client.predict('/predict', [image, audio, qualityMode]);
+  // Positional args match space_app.generate(image_path, audio_path, quality_mode, addons)
+  const result: any = await client.predict('/predict', [image, audio, qualityMode, enhancements]);
 
   // Gradio 5's Video output is { video: <FileData|str>, subtitles }. Normalize
   // across shapes: {url}, {path}, "url", { video: {url|path} | "url" }.

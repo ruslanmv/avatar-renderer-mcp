@@ -30,10 +30,12 @@ def _backend() -> str:
     return (os.getenv("RENDER_BACKEND") or "auto").strip().lower()
 
 
-def _try_lipsync(face_image: str, audio: str, out_path: str) -> str:
+def _try_lipsync(face_image: str, audio: str, out_path: str, enhancements=None) -> str:
     from .lipsync import wav2lip_render  # heavy/lazy
 
-    return wav2lip_render(face_image=face_image, audio=audio, out_path=out_path)
+    return wav2lip_render(
+        face_image=face_image, audio=audio, out_path=out_path, enhancements=enhancements
+    )
 
 
 def _try_pipeline(**kwargs) -> str:
@@ -70,7 +72,7 @@ def render(
     # Build the attempt order.
     attempts = []
     if backend in ("auto", "lipsync"):
-        attempts.append(("wav2lip", lambda: _try_lipsync(face_image, audio, out_path)))
+        attempts.append(("wav2lip", lambda: _try_lipsync(face_image, audio, out_path, enhancements)))
     if backend in ("auto", "full"):
         attempts.append(
             (

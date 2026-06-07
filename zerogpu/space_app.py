@@ -61,15 +61,27 @@ else:
         return fn
 
 
+# Natural-motion add-ons users can toggle to compare (label -> enhancement id).
+ADDON_CHOICES = [
+    ("Head motion (breathing/sway)", "gesture_animation"),
+    ("Eye blink & gaze", "eye_gaze_blink"),
+    ("Emotion analysis", "emotion_expressions"),
+]
+
+
 @gpu
-def generate(image_path: str, audio_path: str, quality_mode: str = "auto") -> str:
+def generate(image_path: str, audio_path: str, quality_mode: str = "auto", addons=None) -> str:
     """Generate a talking-avatar video on GPU and return the output file path.
 
-    Runs inside ZeroGPU's GPU allocation. `render()` selects the full ML pipeline
-    when models + CUDA are available, otherwise the ffmpeg fallback.
+    `addons` is a list of enhancement ids (or labels) to apply for a more natural,
+    less robotic result. Runs inside ZeroGPU's GPU allocation.
     """
     if not image_path or not audio_path:
         raise gr.Error("Please provide both a portrait image and an audio file.")
+
+    # Accept either ids or human labels from the UI/clients.
+    label_to_id = {label: eid for label, eid in ADDON_CHOICES}
+    addons = [label_to_id.get(a, a) for a in (addons or [])]
 
     out_path = str(_OUT_DIR / f"{uuid.uuid4()}.mp4")
     try:
@@ -78,6 +90,7 @@ def generate(image_path: str, audio_path: str, quality_mode: str = "auto") -> st
             audio=audio_path,
             out_path=out_path,
             quality_mode=quality_mode or "auto",
+            enhancements=addons or None,
         )
     except Exception as exc:  # surface a clean error in the UI/API
         raise gr.Error(f"Rendering failed: {exc}") from exc
@@ -112,6 +125,12 @@ def build_ui() -> gr.Blocks:
                     value="auto",
                     label="Quality mode",
                 )
+                addons = gr.CheckboxGroup(
+                    choices=[label for label, _ in ADDON_CHOICES],
+                    value=[],
+                    label="Naturalness add-ons (toggle to compare)",
+                    info="Add subtle head motion, blinking and gaze to look less robotic.",
+                )
                 btn = gr.Button("Generate video", variant="primary")
             with gr.Column(scale=1):
                 # Pre-loaded so visitors see a sample result the moment they open
@@ -131,7 +150,7 @@ def build_ui() -> gr.Blocks:
             )
 
         # Named endpoint for @gradio/client (the Vercel frontend calls "/predict").
-        btn.click(generate, inputs=[image, audio, quality], outputs=out, api_name="predict")
+        btn.click(generate, inputs=[image, audio, quality, addons], outputs=out, api_name="predict")
 
     return demo
 
