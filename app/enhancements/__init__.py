@@ -255,6 +255,7 @@ def _auto_register():
         "viseme_guided",
         "gesture_animation",
         "gaussian_splatting",
+        "mouth_artifact_cleanup",
     ]
     for mod_name in modules:
         try:

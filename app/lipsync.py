@@ -40,6 +40,16 @@ IMG_SIZE = 96            # Wav2Lip face crop size
 MEL_STEP_SIZE = 16
 FPS = 25
 
+# Remove "mouth-within-a-mouth" remnants before face restoration (default on).
+_MOUTH_CLEANUP = os.getenv("LIPSYNC_MOUTH_CLEANUP", "1") == "1"
+
+
+def _cleanup_frame(frame, face_box=None):
+    """Lazy wrapper around the mouth-artifact cleanup (avoids import cost upfront)."""
+    from .enhancements.mouth_artifact_cleanup import cleanup_frame as _cf
+
+    return _cf(frame, face_box=face_box)
+
 
 def _setup() -> Path:
     """Clone Wav2Lip code + fetch the checkpoint. Returns the checkpoint path."""
@@ -237,15 +247,22 @@ def wav2lip_render(
     img_masked = face_resized.copy()
     img_masked[IMG_SIZE // 2:] = 0  # mask lower half (Wav2Lip convention)
 
-    # Wav2Lip reconstructs the whole 96x96 face crop, so upscaling it over the
-    # full (large) face box blurs the entire face. Instead, keep the ORIGINAL
-    # sharp face and feather-blend only the lower (mouth) region from the model.
+    # Blend the Wav2Lip mouth back, but GUARANTEE the mouth interior is 100% owned
+    # by the lip-sync output. A hard "core" over the mouth (set to 1) prevents the
+    # original closed/smiling mouth from bleeding through the feather — which is
+    # what causes the "mouth-within-a-mouth" double-lip artifact. Feathering is
+    # kept only in the surrounding skin (philtrum/cheeks/chin).
     bw, bh = x2 - x1, y2 - y1
-    blend_mask = np.zeros((bh, bw), np.float32)
-    blend_mask[int(bh * 0.52):, :] = 1.0
-    blend_mask = cv2.GaussianBlur(
-        blend_mask, (0, 0), sigmaX=max(1.0, bw * 0.04), sigmaY=max(1.0, bh * 0.04)
-    )[..., None]
+
+    def _mouth_mask(height, width, oy=0, ox=0):
+        m = np.zeros((height, width), np.float32)
+        m[oy + int(bh * 0.45):oy + bh, ox + int(bw * 0.08):ox + int(bw * 0.92)] = 1.0
+        m = cv2.GaussianBlur(m, (0, 0), sigmaX=max(2.0, bw * 0.05), sigmaY=max(2.0, bh * 0.045))
+        core = np.zeros((height, width), np.float32)
+        core[oy + int(bh * 0.55):oy + int(bh * 0.97), ox + int(bw * 0.18):ox + int(bw * 0.82)] = 1.0
+        return np.maximum(m, core)[..., None]
+
+    blend_mask = _mouth_mask(bh, bw)
     orig_region = full[y1:y2, x1:x2].astype(np.float32)
 
     # Anti-flicker: GFPGAN the portrait ONCE → a static sharp base. We then update
@@ -259,12 +276,9 @@ def wav2lip_render(
             )
         except Exception as exc:
             log.warning("GFPGAN base enhance failed (%s).", exc)
-    # Full-image feathered mask, ~1 only over the mouth band (lower face box).
-    comp_mask = np.zeros(full.shape[:2], np.float32)
-    comp_mask[y1 + int(bh * 0.50):y2, x1:x2] = 1.0
-    comp_mask = cv2.GaussianBlur(
-        comp_mask, (0, 0), sigmaX=max(2.0, bw * 0.05), sigmaY=max(2.0, bh * 0.05)
-    )[..., None]
+    # Full-image mask, hard core over the mouth (feather only in skin) — same
+    # guarantee at composite time so the static base's closed mouth can't show.
+    comp_mask = _mouth_mask(full.shape[0], full.shape[1], oy=y1, ox=x1)
 
     batch = 64
     written = 0
@@ -283,9 +297,17 @@ def wav2lip_render(
         for p in pred:
             gen = cv2.resize(p.astype(np.uint8), (bw, bh)).astype(np.float32)
             frame = full.copy()
-            if not (written < len(silent) and silent[written]):
+            open_mouth = not (written < len(silent) and silent[written])
+            if open_mouth:
                 blended = orig_region * (1.0 - blend_mask) + gen * blend_mask
                 frame[y1:y2, x1:x2] = blended.astype(np.uint8)
+                # Remove any double-lip remnant BEFORE restoration (so GFPGAN
+                # doesn't sharpen a bad mouth texture).
+                if _MOUTH_CLEANUP:
+                    try:
+                        frame = _cleanup_frame(frame, face_box=(x1, y1, x2, y2))
+                    except Exception:
+                        pass
             if restorer is not None:
                 try:
                     _, _, frame = restorer.enhance(
