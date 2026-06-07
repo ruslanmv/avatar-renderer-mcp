@@ -1,0 +1,9 @@
+# Optional ZeroGPU Gradio Space requirements (Phase 5).
+# The heavy ML stack (torch, opencv, gfpgan, …) comes from the repo's
+# pyproject.toml — install the package itself alongside these.
+#
+#   pip install -e ..            # the avatar-renderer-mcp package + deps
+#   pip install -r requirements.txt
+#
+gradio>=4.44.0
+spaces>=0.30.0

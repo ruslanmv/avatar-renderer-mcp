@@ -14,6 +14,7 @@ Returns:
 from __future__ import annotations
 
 import importlib.util
+import logging
 import os
 import shutil
 import subprocess
@@ -24,6 +25,8 @@ from pathlib import Path
 from typing import Optional, Any, Tuple, List
 
 import torch
+
+log = logging.getLogger("avatar-renderer.pipeline")
 
 # --------------------------------------------------------------------------- #
 # Torchvision monkeypatch for BasicSR/GFPGAN compatibility (safe no-op if not needed)
@@ -449,8 +452,8 @@ def run_diff2lip(frames_dir: Path, audio_in: str, tmp_dir: Path) -> Path:
         # Simple subprocess call - PyAV should be installed
         cmd = [sys.executable, str(gen)] + all_args
         
-        print(f"[pipeline] Diff2Lip trying ckpt: {ckpt.name}")
-        print(f"[pipeline] Diff2Lip running: {' '.join(cmd)}")
+        log.info(f"[pipeline] Diff2Lip trying ckpt: {ckpt.name}")
+        log.info(f"[pipeline] Diff2Lip running: {' '.join(cmd)}")
 
         if out_mp4.exists():
             out_mp4.unlink()
@@ -458,12 +461,12 @@ def run_diff2lip(frames_dir: Path, audio_in: str, tmp_dir: Path) -> Path:
         code, tail = _run_cmd_capture_tail(cmd, env=env, tail_lines=60)
         if code == 0 and out_mp4.exists() and out_mp4.stat().st_size > 0:
             # ✅ Return just the video - caller uses original audio
-            print(f"[pipeline] Diff2Lip succeeded with {ckpt.name}")
+            log.info(f"[pipeline] Diff2Lip succeeded with {ckpt.name}")
             return out_mp4
 
         last_tail = tail
-        print("[pipeline] Diff2Lip failed output (tail):")
-        print(last_tail)
+        log.warning("[pipeline] Diff2Lip failed output (tail):")
+        log.info(last_tail)
 
     raise RuntimeError(f"Diff2Lip failed for all checkpoints. Last tail:\n{last_tail}")
 
@@ -476,11 +479,11 @@ def run_wav2lip(frames_dir: Path, audio_wav: str, tmp_dir: Path) -> Path:
     wav2lip_dir = EXT_DEPS_DIR / "Wav2Lip"
     script = wav2lip_dir / "inference.py"
     if not script.exists():
-        print("[pipeline] Wav2Lip missing; returning frames without lip-sync.")
+        log.warning("[pipeline] Wav2Lip missing; returning frames without lip-sync.")
         return frames_dir
 
     if not _ffmpeg_binary_available():
-        print("[pipeline] ffmpeg not available; returning frames without lip-sync.")
+        log.warning("[pipeline] ffmpeg not available; returning frames without lip-sync.")
         return frames_dir
 
     silent_vid = tmp_dir / "wav2lip_input.mp4"
@@ -506,10 +509,10 @@ def run_wav2lip(frames_dir: Path, audio_wav: str, tmp_dir: Path) -> Path:
         subprocess.check_call(cmd, env=env)
         if out_vid.exists() and out_vid.stat().st_size > 0:
             return out_vid
-        print("[pipeline] Wav2Lip finished but output missing/empty; returning frames.")
+        log.warning("[pipeline] Wav2Lip finished but output missing/empty; returning frames.")
         return frames_dir
     except Exception as e:
-        print(f"[pipeline] Wav2Lip failed: {e}")
+        log.warning(f"[pipeline] Wav2Lip failed: {e}")
         return frames_dir
 
 
@@ -521,7 +524,7 @@ def enhance_with_gfpgan(frames_or_video: Any, tmp_dir: Path) -> Path:
     try:
         from gfpgan import GFPGANer
     except Exception:
-        print("[pipeline] GFPGAN not installed; skipping.")
+        log.warning("[pipeline] GFPGAN not installed; skipping.")
         return Path(frames_or_video)
 
     import cv2
@@ -553,11 +556,11 @@ def enhance_with_gfpgan(frames_or_video: Any, tmp_dir: Path) -> Path:
             bg_upsampler=None,
         )
     except Exception as e:
-        print(f"[pipeline] Failed to init GFPGAN: {e}")
+        log.warning(f"[pipeline] Failed to init GFPGAN: {e}")
         return input_path
 
     pngs = sorted(glob.glob(str(input_path / "*.png")))
-    print(f"[pipeline] Enhancing {len(pngs)} frames with GFPGAN...")
+    log.info(f"[pipeline] Enhancing {len(pngs)} frames with GFPGAN...")
 
     for p in pngs:
         basename = os.path.basename(p)
@@ -681,17 +684,17 @@ def render_pipeline(
             )
             if enhancement_ctx.audio_path != audio and Path(enhancement_ctx.audio_path).exists():
                 audio = enhancement_ctx.audio_path
-                print(f"[pipeline] Audio updated by TTS enhancement: {audio}")
+                log.info(f"[pipeline] Audio updated by TTS enhancement: {audio}")
 
             # Run pre_motion enhancements (e.g., emotion detection)
             enhancement_ctx = enhancement_registry.apply_stage(
                 enhancement_ctx, "pre_motion", enabled_enhancements
             )
             if enhancement_ctx.detected_emotion:
-                print(f"[pipeline] Detected emotion: {enhancement_ctx.detected_emotion}")
+                log.info(f"[pipeline] Detected emotion: {enhancement_ctx.detected_emotion}")
 
         except ImportError:
-            print("[pipeline] Enhancement modules not available; running core pipeline only.")
+            log.warning("[pipeline] Enhancement modules not available; running core pipeline only.")
             enhancement_ctx = None
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -710,12 +713,12 @@ def render_pipeline(
             if enhancement_ctx.frames_dir and enhancement_ctx.frames_dir.exists():
                 fomm_frames = enhancement_ctx.frames_dir
                 motion_driver_handled = True
-                print(f"[pipeline] Motion driver enhancement produced frames: {fomm_frames}")
+                log.info(f"[pipeline] Motion driver enhancement produced frames: {fomm_frames}")
             elif enhancement_ctx.video_path and enhancement_ctx.video_path.exists():
                 motion_driver_handled = True
-                print(f"[pipeline] Motion driver enhancement produced video: {enhancement_ctx.video_path}")
+                log.info(f"[pipeline] Motion driver enhancement produced video: {enhancement_ctx.video_path}")
         except Exception as e:
-            print(f"[pipeline] Motion driver enhancement failed: {e}. Falling back to FOMM.")
+            log.warning(f"[pipeline] Motion driver enhancement failed: {e}. Falling back to FOMM.")
 
     # Core FOMM (original — only if no motion driver enhancement took over)
     if not motion_driver_handled:
@@ -730,7 +733,7 @@ def render_pipeline(
     if motion_driver_handled and enhancement_ctx and enhancement_ctx.video_path:
         lip_result = enhancement_ctx.video_path
     elif force_wav2lip:
-        print("[pipeline] Wav2Lip forced via --wav2lip flag")
+        log.info("[pipeline] Wav2Lip forced via --wav2lip flag")
         lip_result = run_wav2lip(fomm_frames, audio, tmp)
     else:
         # ─── Check if lip-sync enhancements want to handle this ───
@@ -746,14 +749,14 @@ def render_pipeline(
                 if enhancement_ctx.video_path and enhancement_ctx.video_path.exists():
                     lip_result = enhancement_ctx.video_path
                     lip_sync_handled = True
-                    print(f"[pipeline] Lip-sync enhancement produced: {lip_result}")
+                    log.info(f"[pipeline] Lip-sync enhancement produced: {lip_result}")
                 elif (enhancement_ctx.frames_dir and
                       enhancement_ctx.frames_dir.exists() and
                       enhancement_ctx.frames_dir != fomm_frames):
                     lip_result = enhancement_ctx.frames_dir
                     lip_sync_handled = True
             except Exception as e:
-                print(f"[pipeline] Lip-sync enhancement failed: {e}. Using core lip-sync.")
+                log.warning(f"[pipeline] Lip-sync enhancement failed: {e}. Using core lip-sync.")
 
         # Original lip-sync logic (unchanged fallback)
         if not lip_sync_handled:
@@ -763,9 +766,9 @@ def render_pipeline(
             if want_d2l and d2l_available:
                 try:
                     lip_result = run_diff2lip(fomm_frames, audio, tmp)
-                    print(f"[pipeline] Using original audio for final output (not 16kHz version)")
+                    log.info(f"[pipeline] Using original audio for final output (not 16kHz version)")
                 except Exception as e:
-                    print(f"[pipeline] Diff2Lip failed: {e}. Falling back to Wav2Lip.")
+                    log.warning(f"[pipeline] Diff2Lip failed: {e}. Falling back to Wav2Lip.")
                     lip_result = run_wav2lip(fomm_frames, audio, tmp)
             else:
                 lip_result = run_wav2lip(fomm_frames, audio, tmp)
@@ -798,9 +801,9 @@ def render_pipeline(
                 final_result = enhancement_ctx.video_path
 
             if enhancement_ctx.applied_enhancements:
-                print(f"[pipeline] Applied enhancements: {', '.join(enhancement_ctx.applied_enhancements)}")
+                log.info(f"[pipeline] Applied enhancements: {', '.join(enhancement_ctx.applied_enhancements)}")
         except Exception as e:
-            print(f"[pipeline] Post-processing enhancements failed: {e}. Using core result.")
+            log.warning(f"[pipeline] Post-processing enhancements failed: {e}. Using core result.")
 
     # ─────────────────────────────────────────────────────────────────────────
     # Final encode (unchanged)
@@ -811,19 +814,19 @@ def render_pipeline(
 
     if final_result.is_file() and final_result.suffix.lower() == ".mp4":
         tmp_remux = tmp / "remux.mp4"
-        print(f"[pipeline] Remuxing video with original audio: {final_audio}")
+        log.info(f"[pipeline] Remuxing video with original audio: {final_audio}")
         _remux_video_with_audio(final_result, Path(final_audio), tmp_remux)
         shutil.copy(str(tmp_remux), out_path_abs)
     else:
-        print(f"[pipeline] Encoding frames with original audio: {final_audio}")
+        log.info(f"[pipeline] Encoding frames with original audio: {final_audio}")
         encode_mp4(final_result, final_audio, str(out_path_abs), fps=25)
 
     if not _verify_has_audio(Path(out_path_abs)):
-        print("[pipeline] ⚠️ WARNING: final output seems to have no audio stream after remux.")
+        log.warning("[pipeline] ⚠️ WARNING: final output seems to have no audio stream after remux.")
     else:
-        print("[pipeline] ✅ Audio stream verified in final output")
+        log.info("[pipeline] ✅ Audio stream verified in final output")
 
     if enhancement_ctx and enhancement_ctx.applied_enhancements:
-        print(f"[pipeline] Enhancement summary: {enhancement_ctx.enhancement_logs}")
+        log.info(f"[pipeline] Enhancement summary: {enhancement_ctx.enhancement_logs}")
 
     return out_path_abs

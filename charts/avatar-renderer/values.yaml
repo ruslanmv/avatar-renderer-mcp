@@ -15,7 +15,21 @@ image:
 # ------------------------------------------------------------------------------
 # Replica settings
 # ------------------------------------------------------------------------------
-replicaCount: 0  # start at zero for KEDA scaling
+# Used only when autoscaling.enabled is false. With KEDA scale-to-zero you can
+# set this and autoscaling.minReplicas to 0.
+replicaCount: 1
+
+# Container command/args. Defaults to serving the FastAPI REST API on 8080.
+# Override to run the MCP STDIO server instead (see mcpServer below).
+command: ["python", "-m", "uvicorn"]
+args: ["app.api:app", "--host", "0.0.0.0", "--port", "8080"]
+
+# Extra environment variables passed to the container.
+env: []
+  # - name: CELERY_BROKER_URL
+  #   value: redis://redis:6379/0
+  # - name: DEFAULT_ENHANCEMENTS
+  #   value: emotion_expressions,eye_gaze_blink
 
 # ------------------------------------------------------------------------------
 # Service settings
@@ -43,15 +57,23 @@ resources:
 # ------------------------------------------------------------------------------
 autoscaling:
   enabled: true
-  minReplicas: 0
+  minReplicas: 1
   maxReplicas: 10
   targetCPUUtilizationPercentage: 80
+
+# ------------------------------------------------------------------------------
+# Health probes (FastAPI endpoints)
+# ------------------------------------------------------------------------------
+probes:
+  enabled: true
+  livenessPath: /health/live
+  readinessPath: /health/ready
 
 # ------------------------------------------------------------------------------
 # Node scheduling
 # ------------------------------------------------------------------------------
 nodeSelector:
-  role: gpu: "true"
+  role: gpu
 
 tolerations:
   - key: "dedicated"

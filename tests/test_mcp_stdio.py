@@ -1,107 +1,92 @@
 """
-tests/test_render_api.py
-────────────────────────
-CPU‑only smoke‑test that boots the FastAPI app in‑process, monkey‑patches the
-heavy pipeline with a fast stub, then exercises:
+tests/test_mcp_stdio.py
+───────────────────────
+Unit tests for the MCP STDIO server (``app.mcp_server``).
 
-  •  GET /avatars
-  •  POST /render
-  •  GET /status/<jobId>
+The heavy ``render_pipeline`` is monkey-patched with a fast stub, and the
+server's request handler + worker loop are exercised in-process:
 
-The whole round‑trip must finish in < 5 s on GitHub’s 2‑core runner so the
-main CI workflow stays snappy.
+  •  unknown tool        → {"error": "unknown_tool"}
+  •  missing params      → {"error": "missing_audio_path"}
+  •  valid render_avatar → {"jobId": ..., "output": ..., "qualityMode": ...}
+
+Importing ``app.mcp_server`` must NOT block on stdin or spawn threads — the
+serving loop lives behind ``main()`` — so these tests can drive it directly.
 """
 
-import json
-import os
+import threading
+import time
 from pathlib import Path
-from uuid import UUID
 
 import pytest
-from fastapi.testclient import TestClient
 
-# --------------------------------------------------------------------------- #
-# 1 · Spin the API in ‑process                                                #
-# --------------------------------------------------------------------------- #
-# NOTE: importing *api* before monkey‑patch would pull the real pipeline, so
-# we patch first via `pytest.fixture(autouse=True)`.
+import app.mcp_server as mcp
 
-TMP_OUT = Path(__file__).parent / "tmp_out.mp4"
-
-
-@pytest.fixture(autouse=True)
-def _patch_pipeline(monkeypatch):
-    """
-    Replace the GPU‑heavy `render_pipeline` with a stub that just writes an
-    empty MP4 so the API flow can complete instantly.
-    """
-
-    def _fake_pipeline(*, face_image, audio, out_path, reference_video=None,
-                      viseme_json=None, quality_mode="auto"):
-        # write a trivial MP4 header so FFmpeg players don't choke
-        TMP_OUT.write_bytes(b"\x00" * 1024)
-        Path(out_path).write_bytes(TMP_OUT.read_bytes())
-        return str(out_path)  # Return the output path like the real function
-
-    # Patch the render_pipeline as imported in api.py
-    monkeypatch.setattr("app.api.render_pipeline", _fake_pipeline, raising=False)
-    yield
-    if TMP_OUT.exists():
-        TMP_OUT.unlink()
-
-
-# Import after patching
-from app import api as api_module  # noqa: E402  pylint: disable=wrong-import-position
-
-client = TestClient(api_module.app)
-
-
-# --------------------------------------------------------------------------- #
-# 2 · Fixtures – test assets                                                  #
-# --------------------------------------------------------------------------- #
 ASSETS_DIR = Path(__file__).parent / "assets"
 TEST_FACE = ASSETS_DIR / "alice.png"
 TEST_WAV = ASSETS_DIR / "hello.wav"
 
 
-# --------------------------------------------------------------------------- #
-# 3 · Actual tests                                                             #
-# --------------------------------------------------------------------------- #
-def test_list_avatars(tmp_path, monkeypatch):
-    # No need to patch AVATAR_DIR - the endpoint returns model status
-    res = client.get("/avatars")
-    assert res.status_code == 200
+@pytest.fixture(autouse=True)
+def _patch_pipeline(monkeypatch, tmp_path):
+    """Replace render_pipeline with a stub that writes a trivial MP4."""
 
-    # Verify response structure
-    data = res.json()
-    assert "status" in data
-    assert "models" in data
-    assert "system" in data
-    assert "rendering_modes" in data
-    assert data["status"] == "ready"
+    def _fake_pipeline(*, face_image, audio, out_path, **_kwargs):
+        Path(out_path).write_bytes(b"\x00" * 1024)
+        return str(out_path)
+
+    monkeypatch.setattr(mcp, "render_pipeline", _fake_pipeline, raising=True)
 
 
-def test_render_flow(monkeypatch):
-    # POST render request with correct payload format
-    payload = {
-        "avatarPath": str(TEST_FACE),
-        "audioPath": str(TEST_WAV),
-        "qualityMode": "auto"
-    }
-    res = client.post("/render", json=payload)
-    assert res.status_code == 200
+@pytest.fixture
+def captured_replies(monkeypatch):
+    """Capture everything the server would write to stdout."""
+    replies: list[dict] = []
+    monkeypatch.setattr(mcp, "_reply", replies.append, raising=True)
+    return replies
 
-    body = res.json()
-    job_id = body["jobId"]
-    status_url = body["statusUrl"]
-    # sanity
-    UUID(job_id)  # throws if invalid
-    assert status_url.endswith(job_id)
 
-    # Immediately poll status – our stub writes output synchronously
-    res2 = client.get(f"/status/{job_id}")
-    # Must be 200 and an MP4
-    assert res2.status_code == 200
-    assert res2.headers["content-type"] == "video/mp4"
-    # Response body should contain the same dummy bytes we wrote
-    assert len(res2.content) >= 1024
+def test_unknown_tool(captured_replies):
+    mcp._handle_request({"tool": "nope", "params": {}})
+    assert captured_replies == [{"error": "unknown_tool"}]
+
+
+def test_missing_params(captured_replies):
+    mcp._handle_request({"tool": "render_avatar", "params": {"avatar_path": "x.png"}})
+    assert captured_replies == [{"error": "missing_audio_path"}]
+
+
+def test_render_flow(captured_replies, tmp_path):
+    """Full enqueue → worker render → reply round-trip."""
+    # Run one pass of the worker loop in a background thread.
+    mcp._stop_flag.clear()
+    worker = threading.Thread(target=mcp._worker_loop, daemon=True)
+    worker.start()
+    try:
+        out_path = tmp_path / "out.mp4"
+        mcp._handle_request(
+            {
+                "tool": "render_avatar",
+                "params": {
+                    "avatar_path": str(TEST_FACE),
+                    "audio_path": str(TEST_WAV),
+                    "quality_mode": "real_time",
+                    "out_path": str(out_path),
+                },
+            }
+        )
+
+        # Wait for the worker to produce a reply.
+        deadline = time.time() + 5
+        while not captured_replies and time.time() < deadline:
+            time.sleep(0.02)
+    finally:
+        mcp._stop_flag.set()
+        worker.join(timeout=2)
+
+    assert len(captured_replies) == 1
+    reply = captured_replies[0]
+    assert "error" not in reply
+    assert reply["output"] == str(tmp_path / "out.mp4")
+    assert reply["qualityMode"] == "real_time"
+    assert Path(reply["output"]).exists()

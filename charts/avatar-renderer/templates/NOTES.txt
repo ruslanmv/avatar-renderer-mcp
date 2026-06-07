@@ -1,0 +1,20 @@
+Avatar Renderer MCP has been deployed.
+
+Release:   {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+Image:     {{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}
+
+The FastAPI REST service is exposed on port {{ .Values.service.port }} ({{ .Values.service.type }}).
+
+Port-forward it locally with:
+
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "avatar-renderer.fullname" . }} 8080:{{ .Values.service.port }}
+
+Then open http://localhost:8080/docs for the API, or check health:
+
+  curl http://localhost:8080/health/live
+
+{{- if .Values.autoscaling.enabled }}
+
+Autoscaling is enabled (min {{ .Values.autoscaling.minReplicas }}, max {{ .Values.autoscaling.maxReplicas }} replicas).
+{{- end }}
