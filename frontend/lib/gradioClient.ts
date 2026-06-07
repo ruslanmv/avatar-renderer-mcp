@@ -13,14 +13,20 @@ export const HF_SPACE =
 
 /**
  * Generate a talking-avatar video on the GPU backend.
+ * @param hfToken optional Hugging Face token — when provided, the ZeroGPU run is
+ *   billed against THIS user's quota (instead of the shared anonymous pool).
  * @returns a playable video URL hosted on the Space.
  */
 export async function generateAvatar(
   image: File | Blob,
   audio: File | Blob,
   qualityMode = 'auto',
+  hfToken?: string,
 ): Promise<string> {
-  const client = await Client.connect(HF_SPACE);
+  const client = await Client.connect(
+    HF_SPACE,
+    hfToken ? { hf_token: hfToken as `hf_${string}` } : undefined,
+  );
 
   // Positional args match space_app.generate(image_path, audio_path, quality_mode)
   const result: any = await client.predict('/predict', [image, audio, qualityMode]);

@@ -265,3 +265,7 @@ launcher/web/cache/preview_audio.wav
 # Demo assets that SHOULD be committed (override the *.mp4 rule above)
 !frontend/public/demo.mp4
 !hf/static/demo.mp4
+
+# ZeroGPU Space demo assets (override *.mp4 / *.wav rules)
+!zerogpu/assets/demo.mp4
+!zerogpu/assets/hello.wav

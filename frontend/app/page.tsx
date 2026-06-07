@@ -24,7 +24,9 @@ import {
 } from 'lucide-react';
 
 import HuggingFaceLogin from '../components/HuggingFaceLogin';
+import HfTokenConnect from '../components/HfTokenConnect';
 import { generateAvatar } from '../lib/gradioClient';
+import { getHfToken } from '../lib/hfToken';
 
 const AVATARS = [
   {
@@ -132,7 +134,13 @@ export default function Page() {
 
     try {
       // Inference runs entirely on the Hugging Face Space (no GPU on Vercel).
-      const url = await generateAvatar(avatarFile, audioFile, qualityMode);
+      // Pass the user's HF token (if connected) so the run uses THEIR ZeroGPU quota.
+      const url = await generateAvatar(
+        avatarFile,
+        audioFile,
+        qualityMode,
+        getHfToken() ?? undefined,
+      );
       clearInterval(stepInterval);
       setVideoUrl(url);
       setProgress(100);
@@ -214,6 +222,7 @@ export default function Page() {
           </div>
 
           <div className="flex items-center gap-4">
+            <HfTokenConnect />
             <HuggingFaceLogin />
             <button
               onClick={() => scrollToSection('demo')}

@@ -79,6 +79,12 @@ Runs on Hugging Face **ZeroGPU**. Also callable as an API from the web app.
 """
 
 
+_HERE = Path(__file__).resolve().parent
+_DEMO_VIDEO = str(_HERE / "assets" / "demo.mp4")
+_EX_IMAGE = str(_HERE / "assets" / "alice.png")
+_EX_AUDIO = str(_HERE / "assets" / "hello.wav")
+
+
 def build_ui() -> gr.Blocks:
     theme = gr.themes.Soft(primary_hue="cyan", secondary_hue="blue")
     with gr.Blocks(title="Avatar Renderer — ZeroGPU", theme=theme) as demo:
@@ -94,7 +100,21 @@ def build_ui() -> gr.Blocks:
                 )
                 btn = gr.Button("Generate video", variant="primary")
             with gr.Column(scale=1):
-                out = gr.Video(label="Result", autoplay=True)
+                # Pre-loaded so visitors see a sample result the moment they open
+                # the Space (without spending any GPU quota).
+                out = gr.Video(
+                    label="Result (sample shown — generate your own on the left)",
+                    value=_DEMO_VIDEO if Path(_DEMO_VIDEO).exists() else None,
+                    autoplay=True,
+                )
+
+        # One-click example using bundled sample inputs.
+        if Path(_EX_IMAGE).exists() and Path(_EX_AUDIO).exists():
+            gr.Examples(
+                examples=[[_EX_IMAGE, _EX_AUDIO, "auto"]],
+                inputs=[image, audio, quality],
+                label="Try this example",
+            )
 
         # Named endpoint for @gradio/client (the Vercel frontend calls "/predict").
         btn.click(generate, inputs=[image, audio, quality], outputs=out, api_name="predict")
