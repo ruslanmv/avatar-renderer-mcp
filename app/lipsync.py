@@ -106,6 +106,37 @@ def _detect_face_box(img, pad: float = 0.25):
     return max(0, x - px), max(0, y - py), min(w, x + fw + px), min(h, y + fh + py)
 
 
+def _get_gfpgan(device: str):
+    """Return a GFPGAN restorer (sharpens the Wav2Lip mouth/face), or None."""
+    try:
+        # basicsr (a GFPGAN dep) imports torchvision.transforms.functional_tensor,
+        # removed in torchvision>=0.17. Alias it to functional before importing.
+        import sys
+        try:
+            import torchvision.transforms.functional_tensor  # noqa: F401
+        except Exception:
+            import torchvision.transforms.functional as _F
+            sys.modules["torchvision.transforms.functional_tensor"] = _F
+
+        from gfpgan import GFPGANer
+        from huggingface_hub import hf_hub_download
+
+        weights = LIPSYNC_CACHE / "GFPGANv1.3.pth"
+        if not weights.exists():
+            p = hf_hub_download(repo_id=MODEL_HF_REPO, filename="gfpgan/GFPGANv1.3.pth", repo_type="model")
+            import shutil
+            shutil.copy(p, weights)
+        restorer = GFPGANer(
+            model_path=str(weights), upscale=1, arch="clean",
+            channel_multiplier=2, bg_upsampler=None, device=device,
+        )
+        log.info("GFPGAN restorer ready.")
+        return restorer
+    except Exception as exc:
+        log.warning("GFPGAN unavailable (%s); skipping face restoration.", exc)
+        return None
+
+
 def _load_model(ckpt: Path, device: str):
     import torch
     from models import Wav2Lip  # from the cloned repo
@@ -161,6 +192,7 @@ def wav2lip_render(*, face_image: str, audio: str, out_path: str) -> str:
         i += 1
 
     model = _load_model(ckpt, device)
+    restorer = _get_gfpgan(device) if os.getenv("LIPSYNC_GFPGAN", "1") == "1" else None
 
     frames_dir = tmp / "frames"
     frames_dir.mkdir()
@@ -197,6 +229,15 @@ def wav2lip_render(*, face_image: str, audio: str, out_path: str) -> str:
             blended = orig_region * (1.0 - blend_mask) + gen * blend_mask
             frame = full.copy()
             frame[y1:y2, x1:x2] = blended.astype(np.uint8)
+            if restorer is not None:
+                try:
+                    _, _, frame = restorer.enhance(
+                        frame, has_aligned=False, only_center_face=True, paste_back=True
+                    )
+                except Exception as exc:
+                    if written == 0:
+                        log.warning("GFPGAN enhance failed (%s); using unrestored frames.", exc)
+                    restorer = None
             cv2.imwrite(str(frames_dir / f"{written:05d}.jpg"), frame)
             written += 1
 
