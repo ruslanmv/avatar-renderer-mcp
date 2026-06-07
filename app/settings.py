@@ -215,6 +215,15 @@ class Settings(BaseSettings):
         ),
     )
 
+    RENDER_BACKEND: str = Field(
+        default="auto",
+        description=(
+            "Which renderer to use: 'auto' (try the full ML pipeline, fall back "
+            "to the ffmpeg demo renderer), 'full' (ML pipeline only), or 'simple' "
+            "(dependency-light ffmpeg demo — works on a free CPU Space, no models/GPU)."
+        ),
+    )
+
     # ─────────────────────────────────────────────────────────────────────────
     # Authentication / Hugging Face OAuth (opt-in — disabled by default)
     # ─────────────────────────────────────────────────────────────────────────

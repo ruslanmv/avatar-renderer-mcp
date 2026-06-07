@@ -75,8 +75,10 @@ except ImportError:
     celery_app = None  # type: ignore
     render_task = None  # type: ignore
 
-# import pipeline after Celery to avoid GPU init on health checks
-from .pipeline import render_pipeline  # noqa: E402
+# Renderer dispatcher (auto full-pipeline / simple-ffmpeg). Imported instead of
+# app.pipeline directly so the module never requires torch at import time — this
+# is what lets the lightweight CPU Space boot and still generate videos.
+from .render import render as run_render  # noqa: E402
 
 # ───────────────────────── FastAPI setup ────────────────────────────────── #
 app = FastAPI(
@@ -383,7 +385,7 @@ class TextToAudioResponse(BaseModel):
 def _render_video_thread(payload: dict):
     job_dir = WORK_ROOT / payload["job_id"]
     try:
-        render_pipeline(
+        run_render(
             face_image=payload["avatar_path"],
             audio=payload["audio_path"],
             reference_video=payload.get("driver_video"),
@@ -698,7 +700,12 @@ def list_avatars():
     This endpoint provides health status for all avatar rendering models,
     indicating which models are available and ready for use.
     """
-    import torch
+    # torch is optional on a lightweight (demo) Space — report no GPU if absent.
+    try:
+        import torch
+    except ImportError:
+        torch = None
+
     from pathlib import Path
 
     # Model checkpoint paths from settings
@@ -747,7 +754,7 @@ def list_avatars():
         }
 
     # System capabilities
-    cuda_available = torch.cuda.is_available()
+    cuda_available = bool(torch and torch.cuda.is_available())
     gpu_count = torch.cuda.device_count() if cuda_available else 0
     gpu_info = []
     if cuda_available:

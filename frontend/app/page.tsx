@@ -24,9 +24,9 @@ import {
 } from 'lucide-react';
 
 import HuggingFaceLogin from '../components/HuggingFaceLogin';
-import { authHeaders } from '../lib/api';
-
-const API_BASE = process.env.NEXT_PUBLIC_AVATAR_API_BASE || 'http://localhost:8000';
+import HfTokenConnect from '../components/HfTokenConnect';
+import { generateAvatar } from '../lib/gradioClient';
+import { getHfToken } from '../lib/hfToken';
 
 const AVATARS = [
   {
@@ -85,7 +85,6 @@ export default function Page() {
   const [progress, setProgress] = useState(0);
   const [statusText, setStatusText] = useState('Initializing...');
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
-  const [jobId, setJobId] = useState<string | null>(null);
 
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -114,89 +113,48 @@ export default function Page() {
 
     setIsGenerating(true);
     setProgress(0);
-    setStatusText('Initializing...');
+    setStatusText('Connecting to GPU backend...');
     setVideoUrl(null);
 
-    const fd = new FormData();
-    fd.append('avatar', avatarFile);
-    fd.append('audio', audioFile);
-    fd.append('qualityMode', qualityMode);
-    if (enabledEnhancements.length > 0) {
-      fd.append('enhancements', enabledEnhancements.join(','));
-    }
-    if (script.trim()) {
-      fd.append('transcript', script.trim());
-    }
+    // Indeterminate progress while the Space runs inference on ZeroGPU.
+    const steps = [
+      { p: 20, s: 'Uploading inputs...' },
+      { p: 45, s: 'Allocating GPU...' },
+      { p: 70, s: 'Rendering avatar...' },
+      { p: 90, s: 'Finalizing video...' },
+    ];
+    let stepIndex = 0;
+    const stepInterval = setInterval(() => {
+      if (stepIndex < steps.length) {
+        setProgress(steps[stepIndex].p);
+        setStatusText(steps[stepIndex].s);
+        stepIndex++;
+      }
+    }, 1200);
 
     try {
-      const res = await fetch(`${API_BASE}/render-upload`, {
-        method: 'POST',
-        headers: authHeaders(),
-        body: fd,
-      });
-
-      if (res.status === 401) {
-        throw new Error('Please sign in with Hugging Face before rendering.');
-      }
-
-      if (!res.ok) {
-        throw new Error(`Upload failed: ${res.status}`);
-      }
-
-      const data = await res.json();
-      setJobId(data.jobId);
-
-      await pollStatus(data.jobId);
+      // Inference runs entirely on the Hugging Face Space (no GPU on Vercel).
+      // Pass the user's HF token (if connected) so the run uses THEIR ZeroGPU quota.
+      const url = await generateAvatar(
+        avatarFile,
+        audioFile,
+        qualityMode,
+        getHfToken() ?? undefined,
+      );
+      clearInterval(stepInterval);
+      setVideoUrl(url);
+      setProgress(100);
+      setStatusText('Complete!');
     } catch (err) {
+      clearInterval(stepInterval);
       alert(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
       setIsGenerating(false);
     }
   };
 
-  const pollStatus = async (id: string) => {
-    const steps = [
-      { p: 25, s: 'Mapping facial features...' },
-      { p: 50, s: 'Processing voice input...' },
-      { p: 75, s: 'Rendering expressions...' },
-      { p: 100, s: 'Finalizing avatar...' },
-    ];
-
-    let stepIndex = 0;
-    const stepInterval = setInterval(() => {
-      if (stepIndex < steps.length) {
-        const step = steps[stepIndex];
-        setProgress(step.p);
-        setStatusText(step.s);
-        stepIndex++;
-      }
-    }, 1000);
-
-    for (let i = 0; i < 300; i++) {
-      const r = await fetch(`${API_BASE}/status/${id}`, { headers: authHeaders() });
-
-      const ct = r.headers.get('content-type') || '';
-      if (r.ok && ct.includes('video/mp4')) {
-        clearInterval(stepInterval);
-        const blob = await r.blob();
-        const url = URL.createObjectURL(blob);
-        setVideoUrl(url);
-        setProgress(100);
-        setStatusText('Complete!');
-        setIsGenerating(false);
-        return;
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-    }
-
-    clearInterval(stepInterval);
-    alert('Timed out waiting for generation');
-    setIsGenerating(false);
-  };
-
   const handleCreateAnother = () => {
     setVideoUrl(null);
-    setJobId(null);
     setProgress(0);
     setStatusText('Initializing...');
   };
@@ -264,6 +222,7 @@ export default function Page() {
           </div>
 
           <div className="flex items-center gap-4">
+            <HfTokenConnect />
             <HuggingFaceLogin />
             <button
               onClick={() => scrollToSection('demo')}
@@ -294,23 +253,17 @@ export default function Page() {
           <div className="fade-in mb-12">
             <div className="relative max-w-4xl mx-auto">
               <div className="relative rounded-2xl overflow-hidden shadow-[0_0_50px_rgba(0,150,255,0.3)]">
-                <div className="aspect-video bg-gradient-to-br from-gray-900 to-black flex items-center justify-center">
-                  <div className="text-center">
-                    <div className="flex justify-center items-center gap-1 h-10 mb-4">
-                      {[...Array(7)].map((_, i) => (
-                        <div
-                          key={i}
-                          className="w-1 bg-gradient-to-t from-cyan-400 to-blue-400 rounded-sm"
-                          style={{
-                            animation: `waveform 1.5s ease-in-out infinite`,
-                            animationDelay: `${i * 0.1}s`,
-                          }}
-                        />
-                      ))}
-                    </div>
-                    <p className="text-gray-400">AI Avatar Demo Video</p>
-                  </div>
-                </div>
+                <video
+                  className="aspect-video w-full object-cover bg-black"
+                  src="/demo.mp4"
+                  poster="/demo-poster.jpg"
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  controls
+                  preload="metadata"
+                />
                 <div className="absolute inset-0 border border-cyan-500/30 rounded-2xl pointer-events-none"></div>
               </div>
 

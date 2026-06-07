@@ -35,7 +35,23 @@ if ! mkdir -p "$(dirname "$DATABASE_URL")" 2>/dev/null; then
     echo "       [info] /data not writable; using ephemeral DB at $DATABASE_URL"
 fi
 
-# -- [1/3] Clone external ML repos -------------------------------------------
+# -- Fast path: dependency-light demo renderer -------------------------------
+# When RENDER_BACKEND=simple we skip cloning ML repos and downloading multi-GB
+# checkpoints entirely — the ffmpeg-based renderer needs none of it. This makes
+# the Space boot in seconds on free CPU hardware and still generate videos.
+export RENDER_BACKEND="${RENDER_BACKEND:-simple}"
+if [ "$RENDER_BACKEND" = "simple" ]; then
+    echo "[demo] RENDER_BACKEND=simple — skipping ML repo clone + model download."
+    echo "[demo] Starting server on port ${PORT:-7860}..."
+    exec python -m uvicorn app.api:app \
+        --host "${HOST:-0.0.0.0}" \
+        --port "${PORT:-7860}" \
+        --workers 1 \
+        --timeout-keep-alive 300 \
+        --log-level info
+fi
+
+# -- [1/3] Clone external ML repos (full pipeline only) ----------------------
 echo "[1/3] Setting up external ML dependencies..."
 
 clone_repo() {
