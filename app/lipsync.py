@@ -248,6 +248,24 @@ def wav2lip_render(
     )[..., None]
     orig_region = full[y1:y2, x1:x2].astype(np.float32)
 
+    # Anti-flicker: GFPGAN the portrait ONCE → a static sharp base. We then update
+    # ONLY the mouth band from each per-frame result, so the forehead/eyes/cheeks
+    # stay pixel-stable (no "boiling"/shimmer) and only the mouth moves.
+    base_still = full.copy()
+    if restorer is not None:
+        try:
+            _, _, base_still = restorer.enhance(
+                full, has_aligned=False, only_center_face=True, paste_back=True
+            )
+        except Exception as exc:
+            log.warning("GFPGAN base enhance failed (%s).", exc)
+    # Full-image feathered mask, ~1 only over the mouth band (lower face box).
+    comp_mask = np.zeros(full.shape[:2], np.float32)
+    comp_mask[y1 + int(bh * 0.50):y2, x1:x2] = 1.0
+    comp_mask = cv2.GaussianBlur(
+        comp_mask, (0, 0), sigmaX=max(2.0, bw * 0.05), sigmaY=max(2.0, bh * 0.05)
+    )[..., None]
+
     batch = 64
     written = 0
     # Wav2Lip channel order is [masked, reference] (lower half of the masked copy
@@ -277,7 +295,12 @@ def wav2lip_render(
                     if written == 0:
                         log.warning("GFPGAN enhance failed (%s); using unrestored frames.", exc)
                     restorer = None
-            cv2.imwrite(str(frames_dir / f"{written:05d}.png"), frame)
+            # Composite ONLY the mouth band onto the static base → kills flicker.
+            if frame.shape[:2] != base_still.shape[:2]:
+                frame = cv2.resize(frame, (base_still.shape[1], base_still.shape[0]))
+            out_frame = (base_still.astype(np.float32) * (1.0 - comp_mask)
+                         + frame.astype(np.float32) * comp_mask).astype(np.uint8)
+            cv2.imwrite(str(frames_dir / f"{written:05d}.png"), out_frame)
             written += 1
 
     if written == 0:
