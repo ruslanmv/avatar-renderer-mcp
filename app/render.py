@@ -30,6 +30,20 @@ def _backend() -> str:
     return (os.getenv("RENDER_BACKEND") or "auto").strip().lower()
 
 
+def _try_lipsync(face_image: str, audio: str, out_path: str, enhancements=None) -> str:
+    from .lipsync import wav2lip_render  # heavy/lazy
+
+    return wav2lip_render(
+        face_image=face_image, audio=audio, out_path=out_path, enhancements=enhancements
+    )
+
+
+def _try_pipeline(**kwargs) -> str:
+    from .pipeline import render_pipeline  # heavy import (torch) — lazy
+
+    return render_pipeline(**kwargs)
+
+
 def render(
     *,
     face_image: str,
@@ -41,31 +55,47 @@ def render(
     enhancements: Optional[List[str]] = None,
     transcript: Optional[str] = None,
 ) -> str:
-    """Render an avatar video, returning the output path."""
+    """Render an avatar video, returning the output path.
+
+    Order by RENDER_BACKEND:
+      simple → ffmpeg only.
+      lipsync → Wav2Lip (talking face) then ffmpeg fallback.
+      full → FOMM/Diff2Lip pipeline then ffmpeg fallback.
+      auto (default) → Wav2Lip → full pipeline → ffmpeg, whichever works first.
+    """
     backend = _backend()
-
-    if backend != "simple":
-        try:
-            from .pipeline import render_pipeline  # heavy import (torch) — lazy
-
-            return render_pipeline(
-                face_image=face_image,
-                audio=audio,
-                out_path=out_path,
-                reference_video=reference_video,
-                viseme_json=viseme_json,
-                quality_mode=quality_mode,
-                enhancements=enhancements,
-                transcript=transcript,
-            )
-        except Exception as exc:  # missing torch/models, or a runtime failure
-            if backend == "full":
-                raise
-            log.warning(
-                "Full pipeline unavailable (%s); falling back to the demo renderer.",
-                exc,
-            )
-
     from .simple_render import simple_render
 
+    if backend == "simple":
+        return simple_render(face_image=face_image, audio=audio, out_path=out_path)
+
+    # Build the attempt order.
+    attempts = []
+    if backend in ("auto", "lipsync"):
+        attempts.append(("wav2lip", lambda: _try_lipsync(face_image, audio, out_path, enhancements)))
+    if backend in ("auto", "full"):
+        attempts.append(
+            (
+                "pipeline",
+                lambda: _try_pipeline(
+                    face_image=face_image,
+                    audio=audio,
+                    out_path=out_path,
+                    reference_video=reference_video,
+                    viseme_json=viseme_json,
+                    quality_mode=quality_mode,
+                    enhancements=enhancements,
+                    transcript=transcript,
+                ),
+            )
+        )
+
+    for name, fn in attempts:
+        try:
+            log.info("Rendering with '%s' backend...", name)
+            return fn()
+        except Exception as exc:
+            log.warning("'%s' renderer failed: %s", name, exc)
+
+    log.warning("All model renderers unavailable; using the ffmpeg demo renderer.")
     return simple_render(face_image=face_image, audio=audio, out_path=out_path)
