@@ -23,6 +23,8 @@ MODEL_LICENSES = {
     # Not commercial-safe:
     "wav2lip": {"commercial_ok": False, "license": "research/personal only (LRS2)"},
     "wav2lip_fast": {"commercial_ok": False, "license": "research/personal only (LRS2 weights)"},
+    "wav2lip_raw": {"commercial_ok": False, "license": "research/personal only (LRS2 weights, no restore)"},
+    "wav2lip_band": {"commercial_ok": False, "license": "research/personal only (LRS2 weights)"},
     "fullface": {"commercial_ok": False, "license": "uses Wav2Lip weights (LRS2)"},
     "codeformer": {"commercial_ok": "verify", "license": "NTU S-Lab 1.0 (non-commercial)"},
     "liveportrait": {"commercial_ok": "verify", "license": "MIT code; InsightFace buffalo_l restricts"},

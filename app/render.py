@@ -31,12 +31,14 @@ def _backend() -> str:
     return (os.getenv("RENDER_BACKEND") or "auto").strip().lower()
 
 
-def _try_lipsync(face_image, audio, out_path, enhancements=None, use_gfpgan=None, head_motion=False) -> str:
+def _try_lipsync(face_image, audio, out_path, enhancements=None, use_gfpgan=None,
+                 head_motion=False, full_face=None) -> str:
     from .lipsync import wav2lip_render  # heavy/lazy
 
     return wav2lip_render(
         face_image=face_image, audio=audio, out_path=out_path,
         enhancements=enhancements, use_gfpgan=use_gfpgan, head_motion=head_motion,
+        full_face=full_face,
     )
 
 
@@ -45,7 +47,7 @@ def _try_lipsync(face_image, audio, out_path, enhancements=None, use_gfpgan=None
 # the external repos + model weights present (full GPU build). The "in-process"
 # methods (wav2lip*/fullface/simple) run on the lightweight ZeroGPU Space.
 _PIPELINE_METHODS = {"pipeline", "musetalk", "latentsync", "diff2lip", "wav2lip_pipeline"}
-_INPROC_METHODS = {"simple", "wav2lip", "wav2lip_gfpgan", "fullface"}
+_INPROC_METHODS = {"simple", "wav2lip", "wav2lip_gfpgan", "wav2lip_band", "fullface"}
 _METHODS = _PIPELINE_METHODS | _INPROC_METHODS
 
 
@@ -77,14 +79,22 @@ def render_method(method: str, *, face_image: str, audio: str, out_path: str, en
     if method == "simple":
         return simple_render(face_image=face_image, audio=audio, out_path=out_path)
     if method == "wav2lip":
-        return _try_lipsync(face_image, audio, out_path, use_gfpgan=False, enhancements=enh or None)
+        # Faithful dev-v0.1.25 Wav2Lip, no GFPGAN (raw model output).
+        return _try_lipsync(face_image, audio, out_path, use_gfpgan=False,
+                            full_face=True, enhancements=enh or None)
     if method == "wav2lip_gfpgan":
-        return _try_lipsync(face_image, audio, out_path, use_gfpgan=True, enhancements=enh or None)
+        # Restored original: full-face paste-back + per-frame GFPGAN.
+        return _try_lipsync(face_image, audio, out_path, use_gfpgan=True,
+                            full_face=True, enhancements=enh or None)
+    if method == "wav2lip_band":
+        # Anti-flicker variant: mouth-band blend on a GFPGAN'd static base.
+        return _try_lipsync(face_image, audio, out_path, use_gfpgan=True,
+                            full_face=False, enhancements=enh or None)
     if method == "fullface":
         enh = list(dict.fromkeys(enh + ["eye_gaze_blink"]))
         return _try_lipsync(
             face_image, audio, out_path,
-            use_gfpgan=True, head_motion=True, enhancements=enh,
+            use_gfpgan=True, head_motion=True, full_face=False, enhancements=enh,
         )
     if method in _PIPELINE_METHODS:
         return _run_pipeline_method(method, face_image=face_image, audio=audio, out_path=out_path)

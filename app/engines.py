@@ -139,8 +139,18 @@ registry.register(Engine(
 ))
 registry.register(Engine(
     "wav2lip_fast", "inproc", False, True,
-    "In-process Wav2Lip + GFPGAN (sharp mouth). ZeroGPU preview default.",
+    "In-process Wav2Lip (full-face, dev-v0.1.25) + GFPGAN. ZeroGPU preview default.",
     _run_method("wav2lip_gfpgan"), _torch_ok,
+))
+registry.register(Engine(
+    "wav2lip_raw", "inproc", False, True,
+    "In-process Wav2Lip (full-face, dev-v0.1.25), no GFPGAN restore (raw model).",
+    _run_method("wav2lip"), _torch_ok,
+))
+registry.register(Engine(
+    "wav2lip_band", "inproc", False, True,
+    "In-process Wav2Lip mouth-band blend on a GFPGAN'd static base (anti-flicker).",
+    _run_method("wav2lip_band"), _torch_ok,
 ))
 registry.register(Engine(
     "fullface", "inproc", False, True,

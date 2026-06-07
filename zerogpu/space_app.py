@@ -111,7 +111,9 @@ METHOD_CHOICES = [
     ("MuseTalk — premium real-time (GPU build)", "musetalk"),
     ("Diff2Lip — diffusion lip-sync (GPU build)", "diff2lip"),
     ("Wav2Lip — pipeline (research license, GPU build)", "wav2lip"),
-    ("Wav2Lip fast — in-process (this Space)", "wav2lip_fast"),
+    ("Wav2Lip — full-face + GFPGAN (this Space) ⭐", "wav2lip_fast"),
+    ("Wav2Lip raw — full-face, no restore (this Space)", "wav2lip_raw"),
+    ("Wav2Lip band — mouth-band, anti-flicker (this Space)", "wav2lip_band"),
     ("Full-face — head motion, static bg (this Space)", "fullface"),
     ("Simple — no lip-sync", "simple"),
 ]
