@@ -123,13 +123,13 @@ install: venv install-internal install-git-deps install-external-py download-mod
 .PHONY: install-internal
 install-internal: venv ## Install internal package deps (pyproject.toml)
 	@printf "$(BLUE)Installing internal package deps from pyproject.toml...$(RESET)\n"
-	@$(UV) pip install --python $(VENV_BIN)/python -e .
+	@$(UV) pip install --python $(VENV_BIN)/python --refresh-package avatar-renderer-mcp -e .
 	@printf "$(GREEN)✓ Internal deps installed$(RESET)\n"
 
 .PHONY: dev-install
 dev-install: venv ## Install dev extras too
 	@printf "$(BLUE)Installing dev deps...$(RESET)\n"
-	@$(UV) pip install --python $(VENV_BIN)/python -e ".[dev]"
+	@$(UV) pip install --python $(VENV_BIN)/python --refresh-package avatar-renderer-mcp -e ".[dev]"
 	@$(MAKE) install-git-deps
 	@$(MAKE) install-external-py
 	@$(MAKE) download-models
@@ -305,7 +305,7 @@ install-external-py: venv ## Install external python deps required by cloned rep
 # Models
 # ─────────────────────────────────────────────────────────────────────────────
 .PHONY: download-models
-download-models: ## Download model checkpoints
+download-models: venv ## Download model checkpoints
 	@printf "$(BLUE)Ensuring models exist in $(MODELS_DIR)...$(RESET)\n"
 	@mkdir -p $(MODELS_DIR)
 	@mkdir -p $(MODELS_DIR)/fomm
@@ -314,7 +314,7 @@ download-models: ## Download model checkpoints
 	@mkdir -p $(MODELS_DIR)/sadtalker
 	@mkdir -p $(MODELS_DIR)/gfpgan
 	@if [ -f "scripts/download_models.sh" ]; then \
-        bash scripts/download_models.sh "$(MODELS_DIR)"; \
+        PYTHON="$(VENV_BIN)/python" bash scripts/download_models.sh "$(MODELS_DIR)"; \
     else \
         printf "$(YELLOW)⚠ scripts/download_models.sh not found.$(RESET)\n"; \
         printf "$(YELLOW)  Models must be downloaded manually to:$(RESET)\n"; \
