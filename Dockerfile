@@ -16,22 +16,21 @@ RUN apt-get update && \
 # Create app directory
 WORKDIR /app
 
-# Copy only requirements to leverage Docker cache
-COPY requirements.txt .
-
-# Create and activate venv, install Python deps
+# Create venv
 RUN python3.11 -m venv .venv && \
-    .venv/bin/pip install --upgrade pip setuptools wheel && \
-    .venv/bin/pip install --no-cache-dir -r requirements.txt
+    .venv/bin/pip install --upgrade pip setuptools wheel
 
-# Copy application code
+# Copy project metadata + source, then install from pyproject.toml (no
+# requirements.txt in this repo). README/LICENSE are referenced by the metadata.
+COPY pyproject.toml README.md LICENSE ./
 COPY app/ app/
-COPY mcp-server.py mcp_server.py
+RUN .venv/bin/pip install --no-cache-dir .
+
+# Remaining runtime assets
 COPY scripts/download_models.sh scripts/download_models.sh
 COPY charts charts
 COPY k8s k8s
 COPY mcp-tool.json .
-COPY LICENSE README.md .
 
 # Ensure venv is used by default
 ENV PATH="/app/.venv/bin:${PATH}"
@@ -44,7 +43,7 @@ EXPOSE 8080
 # For simplicity, we launch REST by default; MCP can be enabled by env VAR
 CMD ["bash", "-lc", "\
   if [ \"$MCP_ENABLE\" = \"true\" ]; then \
-    exec python mcp_server.py; \
+    exec python -m app.mcp_server; \
   else \
     exec uvicorn app.api:app --host 0.0.0.0 --port 8080; \
   fi\

@@ -1,90 +1,60 @@
 # =============================================================================
-# Avatar Renderer MCP — Hugging Face Spaces Dockerfile
+# Avatar Renderer MCP — Hugging Face GPU Docker Space (dev-v0.1.25 architecture)
 # =============================================================================
-# Ultra-lean build following ollabridge-cloud pattern exactly.
-# ALL heavy deps (PyTorch, ML libs) installed at STARTUP, not build.
-# Build only installs FastAPI + lightweight deps (~30s).
+# Full pipeline: FOMM → Diff2Lip/MuseTalk/LatentSync → Wav2Lip fallback → GFPGAN.
+# Requires a GPU runtime (attach T4/A10G in the Space hardware settings). On CPU
+# it builds and serves but the heavy engines are slow/limited.
 # =============================================================================
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
 
-FROM python:3.11-slim
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
 
-# -- Minimal system deps (identical to ollabridge) ----------------------------
+# System deps for OpenCV / audio / ffmpeg / pyaudio.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl \
-        ca-certificates \
-        procps \
-        ffmpeg \
-        git \
-        libgl1 \
-        libglib2.0-0 \
-        libsm6 \
-        libxext6 \
-        libxrender1 \
-        libsndfile1 \
-    && rm -rf /var/lib/apt/lists/*
+        python3.11 python3.11-dev python3-pip \
+        git wget curl ffmpeg \
+        libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 libsndfile1 portaudio19-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3.11 /usr/bin/python
 
-# -- Create app user (HF Spaces runs as uid 1000) ----------------------------
+# HF Spaces run as uid 1000.
 RUN useradd -m -u 1000 appuser && \
-    mkdir -p /app /tmp/avatar-jobs /tmp/avatar-cache && \
-    chown -R appuser:appuser /app /tmp/avatar-jobs /tmp/avatar-cache
+    mkdir -p /app /data /tmp/avatar-jobs /tmp/avatar-cache && \
+    chown -R appuser:appuser /app /data /tmp/avatar-jobs /tmp/avatar-cache
 
 WORKDIR /app
 
-# -- Copy dependency spec first (cache layer) ---------------------------------
-COPY pyproject.toml ./
+# Install the package (full ML stack) from pyproject. Cache layer: deps first.
+COPY --chown=appuser:appuser pyproject.toml README.md LICENSE ./
+COPY --chown=appuser:appuser app/ app/
+RUN python -m pip install --upgrade pip setuptools wheel && \
+    python -m pip install .
 
-# -- Install ONLY lightweight deps at build time ------------------------------
-# Heavy packages (torch, transformers, opencv, etc.) are installed at startup.
-# This keeps the Docker build under 3 minutes (like ollabridge).
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir \
-        "fastapi>=0.116.1,<0.117.0" \
-        "uvicorn[standard]>=0.23.2,<0.24.0" \
-        "python-multipart>=0.0.5,<0.1.0" \
-        "pydantic>=2.11.1,<3.0.0" \
-        "pydantic-settings>=2.10.1,<3.0.0" \
-        "python-dotenv>=1.0.0,<2.0.0" \
-        "PyYAML>=6.0.0,<7.0.0" \
-        "tqdm>=4.65.0,<5.0.0" \
-        "click>=8.1.0,<9.0.0" \
-        "rich>=13.0.0,<14.0.0" \
-        "requests>=2.32.0" \
-        "huggingface-hub>=0.20.0"
+# Runtime assets + startup script.
+COPY --chown=appuser:appuser start.sh /app/start.sh
+COPY --chown=appuser:appuser static /app/static
+COPY --chown=appuser:appuser scripts/download_models.sh /app/scripts/download_models.sh
+RUN chmod +x /app/start.sh && \
+    mkdir -p /app/models /app/external_deps && \
+    chown -R appuser:appuser /app
 
-# -- Copy application code ----------------------------------------------------
-COPY . .
-
-# -- Startup script -----------------------------------------------------------
-COPY start.sh /app/start.sh
-RUN chmod +x /app/start.sh
-
-# -- Model directories --------------------------------------------------------
-RUN mkdir -p /app/models/fomm /app/models/wav2lip /app/models/diff2lip \
-             /app/models/gfpgan /app/models/sadtalker
-
-# -- Environment defaults for HF Spaces --------------------------------------
-# RENDER_BACKEND=simple → dependency-light ffmpeg renderer (no torch/models/GPU).
-# The Space generates real MP4s on free CPU hardware with ZERO required secrets.
-# To enable the full lip-sync pipeline, run on GPU hardware and set
-# RENDER_BACKEND=auto (the start script will then fetch models).
+# RENDER_BACKEND=auto → start.sh clones engine repos, downloads weights, and the
+# tier-driven renderer prefers the full pipeline (Diff2Lip primary, Wav2Lip fallback).
 ENV MODEL_ROOT=/app/models \
     EXT_DEPS_DIR=/app/external_deps \
-    PYTHONPATH="/app" \
+    RENDER_BACKEND=auto \
     PORT=7860 \
     HOST=0.0.0.0 \
     LOG_LEVEL=INFO \
-    RENDER_BACKEND=simple \
     HF_HUB_DISABLE_TELEMETRY=1 \
     DO_NOT_TRACK=1
 
-RUN chown -R appuser:appuser /app /tmp/avatar-jobs /tmp/avatar-cache
-
-# Switch to non-root user
 USER appuser
-
 EXPOSE 7860
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=300s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=1200s --retries=5 \
     CMD curl -f http://localhost:7860/health/live || exit 1
 
-CMD ["/app/start.sh"]
+CMD ["bash", "/app/start.sh"]

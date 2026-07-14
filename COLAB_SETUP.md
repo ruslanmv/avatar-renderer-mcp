@@ -2,6 +2,33 @@
 
 This guide explains how to use Avatar Renderer MCP in Google Colab.
 
+There are **two** notebooks:
+
+| Notebook | Engines | Use it for |
+|---|---|---|
+| [`demo_colab.ipynb`](demo_colab.ipynb) | SadTalker · FOMM · Wav2Lip · Diff2Lip | The standard demo / quick start |
+| [`demo_colab_premium.ipynb`](demo_colab_premium.ipynb) | **MuseTalk · Diff2Lip · LatentSync** | Running the *premium* engines that can't run on ZeroGPU |
+
+## ⭐ Premium engines on a Colab GPU
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ruslanmv/avatar-renderer-mcp/blob/main/demo_colab_premium.ipynb)
+
+The HF **ZeroGPU** Space only GPU-accelerates in-process code inside `@spaces.GPU`.
+The premium engines (**MuseTalk / LatentSync / Diff2Lip**) run as subprocesses that
+need their own repos + multi-GB weights, so they report *unavailable* there — by
+design, the orchestrator errors instead of silently downgrading. A persistent Colab
+GPU runs them natively.
+
+`demo_colab_premium.ipynb`:
+1. Checks the GPU + VRAM and adapts (enables LatentSync only on A100/L4).
+2. Clones the repo and the engine repos via `scripts/download_enhancements.sh`.
+3. Downloads core weights (FOMM/Wav2Lip/Diff2Lip/GFPGAN) + MuseTalk weights.
+4. Lists engine availability + commercial-license status from the **engine registry**.
+5. Renders through the production `orchestrate()` selector — pick any engine.
+
+**VRAM guide:** Free **T4 (16 GB)** → MuseTalk + Diff2Lip + Wav2Lip ✅.
+**LatentSync** (≈8–18 GB at high res) → **A100/L4 (Colab Pro)**.
+
 ## 📓 Quick Start
 
 ### Option 1: Open Directly in Colab

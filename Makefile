@@ -9,7 +9,18 @@ SHELL := /bin/bash
 # ─────────────────────────────────────────────────────────────────────────────
 PYTHON        ?= python3.11
 UV            ?= uv
-VENV_DIR      ?= .venv
+
+# venv location. On a Windows drive under WSL (/mnt/*), installing a venv onto
+# drvfs fails with cross-filesystem hardlink + I/O errors (os error 5), e.g.
+# while unpacking sympy. In that case put the venv on the Linux filesystem
+# (same fs as uv's cache → fast hardlinks, no EIO) and force copy link-mode as a
+# belt-and-suspenders. Override with `make VENV_DIR=...` if you prefer.
+ifneq (,$(findstring /mnt/,$(CURDIR)))
+  VENV_DIR    ?= $(HOME)/.cache/avatar-renderer/venv
+  export UV_LINK_MODE := copy
+else
+  VENV_DIR    ?= .venv
+endif
 VENV_BIN       = $(VENV_DIR)/bin
 EXT_DEPS_DIR  ?= external_deps
 MODELS_DIR    ?= $(CURDIR)/models
@@ -67,6 +78,7 @@ verify-ffmpeg: ## Verify ffmpeg is installed
 .PHONY: venv
 venv: verify-uv ## Create venv if missing
 	@if [ ! -d "$(VENV_DIR)" ]; then \
+        mkdir -p "$$(dirname "$(VENV_DIR)")"; \
         $(UV) venv $(VENV_DIR) --python $(PYTHON); \
     fi
 	@printf "$(GREEN)✓ venv ready: $(VENV_DIR)$(RESET)\n"

@@ -85,8 +85,22 @@ clone_repo "guided-diffusion" \
     "https://github.com/openai/guided-diffusion.git" \
     "$EXT_DEPS_DIR/guided-diffusion"
 
+# Premium lip-sync engines (dev-v0.1.25 primaries)
+clone_repo "MuseTalk" \
+    "https://github.com/TMElyralab/MuseTalk.git" \
+    "$EXT_DEPS_DIR/MuseTalk"
+
+clone_repo "LatentSync" \
+    "https://github.com/bytedance/LatentSync.git" \
+    "$EXT_DEPS_DIR/LatentSync"
+
+# Install each engine repo's own requirements (best-effort; some pin heavy deps).
+for req in "$EXT_DEPS_DIR"/MuseTalk/requirements.txt "$EXT_DEPS_DIR"/LatentSync/requirements.txt; do
+    [ -f "$req" ] && pip install --no-cache-dir -r "$req" 2>/dev/null || true
+done
+
 # Set PYTHONPATH to include all external deps
-export PYTHONPATH="/app:${EXT_DEPS_DIR}/first-order-model:${EXT_DEPS_DIR}/Wav2Lip:${EXT_DEPS_DIR}/SadTalker:${EXT_DEPS_DIR}/Diff2Lip:${EXT_DEPS_DIR}/guided-diffusion"
+export PYTHONPATH="/app:${EXT_DEPS_DIR}/first-order-model:${EXT_DEPS_DIR}/Wav2Lip:${EXT_DEPS_DIR}/SadTalker:${EXT_DEPS_DIR}/Diff2Lip:${EXT_DEPS_DIR}/guided-diffusion:${EXT_DEPS_DIR}/MuseTalk:${EXT_DEPS_DIR}/LatentSync"
 
 # -- [2/3] Download model checkpoints ----------------------------------------
 echo "[2/3] Checking model checkpoints..."

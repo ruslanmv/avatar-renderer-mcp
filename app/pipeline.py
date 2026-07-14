@@ -151,9 +151,6 @@ def _make_silent_video_from_frames(frames_dir: Path, out_mp4: Path, fps: int = 2
         "-r", str(fps),
         "-i", str(frames_dir / "%04d.png"),
         "-an",
-        # H.264 yuv420p requires even dimensions; frame sequences can inherit
-        # odd portrait sizes, so pad by at most one pixel before encoding.
-        "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2",
         "-c:v", "libx264",
         "-pix_fmt", "yuv420p",
         str(out_mp4),
@@ -599,9 +596,6 @@ def encode_mp4(frames_dir: Path, audio_wav: str, out_mp4: str, fps: int = 25) ->
         "-r", str(fps),
         "-i", f"{frames_dir}/%04d.png",
         "-i", audio_wav,
-        # H.264 yuv420p requires even dimensions; final frame directories can
-        # contain odd-sized images, so pad by at most one pixel before encoding.
-        "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2",
         "-c:v", "libx264",
         "-preset", "fast",
         "-crf", "23",
@@ -780,8 +774,24 @@ def render_pipeline(
                 lip_result = run_wav2lip(fomm_frames, audio, tmp)
 
     final_result: Path = lip_result
+
+    # Mouth-artifact cleanup BEFORE face restoration, so GFPGAN does not sharpen a
+    # "mouth-within-a-mouth" remnant (the lip-sync must own the mouth interior).
+    try:
+        if final_result.is_dir():
+            import cv2
+            from .enhancements.mouth_artifact_cleanup import cleanup_frame
+
+            for fp in sorted(glob.glob(str(final_result / "*.png"))):
+                img = cv2.imread(fp)
+                if img is not None:
+                    cv2.imwrite(fp, cleanup_frame(img))
+            log.info("Applied mouth-artifact cleanup before GFPGAN")
+    except Exception as e:
+        log.warning("Mouth cleanup skipped: %s", e)
+
     if GFPGAN_CKPT.exists():
-        final_result = enhance_with_gfpgan(lip_result, tmp)
+        final_result = enhance_with_gfpgan(final_result, tmp)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Post-processing enhancements (eye gaze, viseme, gestures — additive)

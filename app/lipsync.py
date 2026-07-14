@@ -22,6 +22,7 @@ ffmpeg renderer so the product never hard-fails.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import subprocess
 import sys
@@ -39,6 +40,18 @@ MODEL_HF_FILE = os.getenv("LIPSYNC_HF_FILE", "wav2lip/wav2lip_gan.pth")
 IMG_SIZE = 96            # Wav2Lip face crop size
 MEL_STEP_SIZE = 16
 FPS = 25
+
+# Remove "mouth-within-a-mouth" remnants before restoration. Default OFF: the
+# hard mouth-core mask already prevents the double-lip artifact, and the cleanup
+# darkening can smudge lips/chin. Enable only for problematic smiley sources.
+_MOUTH_CLEANUP = os.getenv("LIPSYNC_MOUTH_CLEANUP", "0") == "1"
+
+
+def _cleanup_frame(frame, face_box=None):
+    """Lazy wrapper around the mouth-artifact cleanup (avoids import cost upfront)."""
+    from .enhancements.mouth_artifact_cleanup import cleanup_frame as _cf
+
+    return _cf(frame, face_box=face_box)
 
 
 def _setup() -> Path:
@@ -103,7 +116,12 @@ def _detect_face_box(img, pad: float = 0.25):
         return 0, 0, w, h
     x, y, fw, fh = max(faces, key=lambda b: b[2] * b[3])
     px, py = int(fw * pad), int(fh * pad)
-    return max(0, x - px), max(0, y - py), min(w, x + fw + px), min(h, y + fh + py)
+    # Cast to plain python ints — numpy ints break cv2 geometry calls
+    # (cv2.ellipse / getRotationMatrix2D raise "Can't parse 'center'").
+    return (
+        int(max(0, x - px)), int(max(0, y - py)),
+        int(min(w, x + fw + px)), int(min(h, y + fh + py)),
+    )
 
 
 def _get_gfpgan(device: str):
@@ -149,9 +167,25 @@ def _load_model(ckpt: Path, device: str):
 
 
 def wav2lip_render(
-    *, face_image: str, audio: str, out_path: str, enhancements: "list | None" = None
+    *,
+    face_image: str,
+    audio: str,
+    out_path: str,
+    enhancements: "list | None" = None,
+    use_gfpgan: "bool | None" = None,
+    head_motion: bool = False,
+    full_face: "bool | None" = None,
 ) -> str:
-    """Render a lip-synced talking-face MP4. Raises on failure (caller falls back)."""
+    """Render a lip-synced talking-face MP4. Raises on failure (caller falls back).
+
+    Two compositing modes:
+      • full_face=True  — the FAITHFUL dev-v0.1.25 path: paste the WHOLE predicted
+        Wav2Lip face crop back into the frame each frame, then GFPGAN per-frame.
+        This is the "original" behaviour (most natural mouth) and is the default
+        unless explicitly disabled.
+      • full_face=False — mouth-band blend onto a GFPGAN'd static base (anti-flicker).
+        Steadier background, but a more constrained mouth; kept for the fast tier.
+    """
     import cv2
     import numpy as np
     import torch
@@ -161,6 +195,11 @@ def wav2lip_render(
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     log.info("Wav2Lip running on %s", device)
+
+    # Default to the faithful full-face paste-back (dev-v0.1.25 behaviour). The
+    # mouth-band/static-base path is opt-in (LIPSYNC_FULL_FACE=0) for the fast tier.
+    if full_face is None:
+        full_face = os.getenv("LIPSYNC_FULL_FACE", "1") == "1"
 
     full = cv2.imread(face_image)
     if full is None:
@@ -230,41 +269,61 @@ def wav2lip_render(
     silent = [r < sil_thr for r in rms] if peak > 0 else [False] * len(mel_chunks)
 
     model = _load_model(ckpt, device)
-    restorer = _get_gfpgan(device) if os.getenv("LIPSYNC_GFPGAN", "1") == "1" else None
+    want_gfpgan = use_gfpgan if use_gfpgan is not None else (os.getenv("LIPSYNC_GFPGAN", "1") == "1")
+    restorer = _get_gfpgan(device) if want_gfpgan else None
 
     frames_dir = tmp / "frames"
     frames_dir.mkdir()
     img_masked = face_resized.copy()
     img_masked[IMG_SIZE // 2:] = 0  # mask lower half (Wav2Lip convention)
 
-    # Wav2Lip reconstructs the whole 96x96 face crop, so upscaling it over the
-    # full (large) face box blurs the entire face. Instead, keep the ORIGINAL
-    # sharp face and feather-blend only the lower (mouth) region from the model.
+    # Blend the Wav2Lip mouth back, but GUARANTEE the mouth interior is 100% owned
+    # by the lip-sync output. A hard "core" over the mouth (set to 1) prevents the
+    # original closed/smiling mouth from bleeding through the feather — which is
+    # what causes the "mouth-within-a-mouth" double-lip artifact. Feathering is
+    # kept only in the surrounding skin (philtrum/cheeks/chin).
     bw, bh = x2 - x1, y2 - y1
-    blend_mask = np.zeros((bh, bw), np.float32)
-    blend_mask[int(bh * 0.52):, :] = 1.0
-    blend_mask = cv2.GaussianBlur(
-        blend_mask, (0, 0), sigmaX=max(1.0, bw * 0.04), sigmaY=max(1.0, bh * 0.04)
-    )[..., None]
-    orig_region = full[y1:y2, x1:x2].astype(np.float32)
 
-    # Anti-flicker: GFPGAN the portrait ONCE → a static sharp base. We then update
-    # ONLY the mouth band from each per-frame result, so the forehead/eyes/cheeks
-    # stay pixel-stable (no "boiling"/shimmer) and only the mouth moves.
-    base_still = full.copy()
-    if restorer is not None:
-        try:
-            _, _, base_still = restorer.enhance(
-                full, has_aligned=False, only_center_face=True, paste_back=True
-            )
-        except Exception as exc:
-            log.warning("GFPGAN base enhance failed (%s).", exc)
-    # Full-image feathered mask, ~1 only over the mouth band (lower face box).
-    comp_mask = np.zeros(full.shape[:2], np.float32)
-    comp_mask[y1 + int(bh * 0.50):y2, x1:x2] = 1.0
-    comp_mask = cv2.GaussianBlur(
-        comp_mask, (0, 0), sigmaX=max(2.0, bw * 0.05), sigmaY=max(2.0, bh * 0.05)
-    )[..., None]
+    def _mouth_mask(height, width, oy=0, ox=0):
+        m = np.zeros((height, width), np.float32)
+        m[oy + int(bh * 0.45):oy + bh, ox + int(bw * 0.08):ox + int(bw * 0.92)] = 1.0
+        m = cv2.GaussianBlur(m, (0, 0), sigmaX=max(2.0, bw * 0.05), sigmaY=max(2.0, bh * 0.045))
+        core = np.zeros((height, width), np.float32)
+        core[oy + int(bh * 0.55):oy + int(bh * 0.97), ox + int(bw * 0.18):ox + int(bw * 0.82)] = 1.0
+        return np.maximum(m, core)[..., None]
+
+    # The mouth-band masks + GFPGAN'd static base are only needed for the
+    # anti-flicker (non-full-face) path. The faithful full-face path pastes the
+    # whole crop + GFPGANs every frame, so skip this setup (and its wasted
+    # one-off GFPGAN pass) when full_face is on and there's no head motion.
+    blend_mask = orig_region = base_still = comp_mask = head_mask = None
+    if not full_face:
+        blend_mask = _mouth_mask(bh, bw)
+        orig_region = full[y1:y2, x1:x2].astype(np.float32)
+
+        # Anti-flicker: GFPGAN the portrait ONCE → a static sharp base. We then
+        # update ONLY the mouth band from each per-frame result, so forehead/
+        # eyes/cheeks stay pixel-stable (no "boiling"/shimmer) and only the mouth moves.
+        base_still = full.copy()
+        if restorer is not None:
+            try:
+                _, _, base_still = restorer.enhance(
+                    full, has_aligned=False, only_center_face=True, paste_back=True
+                )
+            except Exception as exc:
+                log.warning("GFPGAN base enhance failed (%s).", exc)
+        # Full-image mask, hard core over the mouth (feather only in skin) — same
+        # guarantee at composite time so the static base's closed mouth can't show.
+        comp_mask = _mouth_mask(full.shape[0], full.shape[1], oy=y1, ox=x1)
+
+    # Whole-head motion mask (feathered ellipse over the head). When head_motion
+    # is on, the head moves subtly while the BACKGROUND stays static (the head is
+    # warped and composited back over the static base only inside this mask).
+    if head_motion:
+        hm = np.zeros(full.shape[:2], np.float32)
+        cx, cy = int((x1 + x2) // 2), int((y1 + y2) // 2)
+        cv2.ellipse(hm, (cx, cy), (int(bw * 0.90), int(bh * 1.10)), 0, 0, 360, 1.0, -1)
+        head_mask = cv2.GaussianBlur(hm, (0, 0), sigmaX=bw * 0.07, sigmaY=bh * 0.07)[..., None]
 
     batch = 64
     written = 0
@@ -283,9 +342,40 @@ def wav2lip_render(
         for p in pred:
             gen = cv2.resize(p.astype(np.uint8), (bw, bh)).astype(np.float32)
             frame = full.copy()
-            if not (written < len(silent) and silent[written]):
+            open_mouth = not (written < len(silent) and silent[written])
+
+            if full_face:
+                # ── Faithful dev-v0.1.25 path ──────────────────────────────────
+                # Paste the WHOLE predicted face crop back, then GFPGAN per-frame.
+                # During silence keep the original resting face (no paste) so the
+                # mouth doesn't drift when there's nothing to say.
+                if open_mouth:
+                    frame[y1:y2, x1:x2] = gen.astype(np.uint8)
+                if restorer is not None:
+                    try:
+                        _, _, frame = restorer.enhance(
+                            frame, has_aligned=False, only_center_face=True, paste_back=True
+                        )
+                    except Exception as exc:
+                        if written == 0:
+                            log.warning("GFPGAN enhance failed (%s); using unrestored frames.", exc)
+                        restorer = None
+                out_frame = frame
+                cv2.imwrite(str(frames_dir / f"{written:05d}.png"), out_frame)
+                written += 1
+                continue
+
+            # ── Mouth-band blend on a static base (anti-flicker fast path) ─────
+            if open_mouth:
                 blended = orig_region * (1.0 - blend_mask) + gen * blend_mask
                 frame[y1:y2, x1:x2] = blended.astype(np.uint8)
+                # Remove any double-lip remnant BEFORE restoration (so GFPGAN
+                # doesn't sharpen a bad mouth texture).
+                if _MOUTH_CLEANUP:
+                    try:
+                        frame = _cleanup_frame(frame, face_box=(x1, y1, x2, y2))
+                    except Exception:
+                        pass
             if restorer is not None:
                 try:
                     _, _, frame = restorer.enhance(
@@ -300,6 +390,26 @@ def wav2lip_render(
                 frame = cv2.resize(frame, (base_still.shape[1], base_still.shape[0]))
             out_frame = (base_still.astype(np.float32) * (1.0 - comp_mask)
                          + frame.astype(np.float32) * comp_mask).astype(np.uint8)
+
+            # Whole-head motion on a STATIC background: warp the head and
+            # composite it back over the static base only inside the head mask.
+            if head_mask is not None:
+                t = written / float(FPS)
+                dx = 3.0 * math.sin(2 * math.pi * 0.25 * t)
+                dy = 2.0 * math.sin(2 * math.pi * 0.18 * t + 1.0)
+                ang = 0.8 * math.sin(2 * math.pi * 0.20 * t)
+                sc = 1.0 + 0.006 * math.sin(2 * math.pi * 0.15 * t)
+                cx, cy = float((x1 + x2) // 2), float((y1 + y2) // 2)
+                M = cv2.getRotationMatrix2D((cx, cy), ang, sc)
+                M[0, 2] += dx
+                M[1, 2] += dy
+                warped = cv2.warpAffine(
+                    out_frame, M, (out_frame.shape[1], out_frame.shape[0]),
+                    flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE,
+                )
+                out_frame = (base_still.astype(np.float32) * (1.0 - head_mask)
+                             + warped.astype(np.float32) * head_mask).astype(np.uint8)
+
             cv2.imwrite(str(frames_dir / f"{written:05d}.png"), out_frame)
             written += 1
 
@@ -334,10 +444,6 @@ def wav2lip_render(
             "-framerate", str(FPS), "-i", str(final_dir / "%05d.png"),
             "-i", audio_for_mux,
             "-map", "0:v:0", "-map", "1:a:0",
-            # H.264 yuv420p requires even dimensions. Uploaded portraits can be
-            # odd-sized (for example 433x433), so pad by at most one pixel
-            # instead of letting libx264 fail and falling back to non-lipsync.
-            "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2",
             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20",
             "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart",
             out_path,
