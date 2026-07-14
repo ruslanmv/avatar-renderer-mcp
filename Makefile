@@ -123,13 +123,13 @@ install: venv install-internal install-git-deps install-external-py download-mod
 .PHONY: install-internal
 install-internal: venv ## Install internal package deps (pyproject.toml)
 	@printf "$(BLUE)Installing internal package deps from pyproject.toml...$(RESET)\n"
-	@$(UV) pip install --python $(VENV_BIN)/python -e .
+	@$(UV) pip install --python $(VENV_BIN)/python --refresh-package avatar-renderer-mcp -e .
 	@printf "$(GREEN)✓ Internal deps installed$(RESET)\n"
 
 .PHONY: dev-install
 dev-install: venv ## Install dev extras too
 	@printf "$(BLUE)Installing dev deps...$(RESET)\n"
-	@$(UV) pip install --python $(VENV_BIN)/python -e ".[dev]"
+	@$(UV) pip install --python $(VENV_BIN)/python --refresh-package avatar-renderer-mcp -e ".[dev]"
 	@$(MAKE) install-git-deps
 	@$(MAKE) install-external-py
 	@$(MAKE) download-models
