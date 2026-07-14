@@ -253,11 +253,17 @@ install-external-py: venv ## Install external python deps required by cloned rep
 	@# Audio processing
 	@printf "$(BLUE)→ Installing audio processing stack...$(RESET)\n"
 	@$(UV) pip install --python $(VENV_BIN)/python \
+        --reinstall-package setuptools \
         "setuptools>=68.0.0" \
-        "librosa==0.9.2" \
+        wheel \
+        "librosa==0.11.0" \
         "soundfile>=0.12.0,<0.13.0" \
         "numba>=0.58.0" \
         || { printf "$(RED)✗ Audio deps failed$(RESET)\n"; exit 1; }
+	@$(VENV_BIN)/python -c "import pkg_resources, librosa; print('  ✓ pkg_resources available via setuptools; librosa:', librosa.__version__)" || { \
+        printf "$(RED)✗ Audio import check failed (pkg_resources/librosa)$(RESET)\n"; \
+        exit 1; \
+    }
 
 	@# Video processing
 	@printf "$(BLUE)→ Installing video processing stack...$(RESET)\n"
@@ -340,7 +346,7 @@ verify: venv ## Verify all dependencies are installed
 	@$(VENV_BIN)/python -c "import numpy as np; print('  ✅ numpy:', np.__version__, '(must be <2.0.0)')" || printf "  $(RED)❌ numpy missing$(RESET)\n"
 	
 	@printf "\n$(BOLD)Audio/Video Processing:$(RESET)\n"
-	@$(VENV_BIN)/python -c "import librosa; print('  ✅ librosa:', librosa.__version__, '(must be 0.9.x)')" 2>/dev/null || printf "  $(RED)❌ librosa missing$(RESET)\n"
+	@$(VENV_BIN)/python -c "import librosa; print('  ✅ librosa:', librosa.__version__, '(aligned with chatterbox-tts)')" 2>/dev/null || printf "  $(RED)❌ librosa missing$(RESET)\n"
 	@$(VENV_BIN)/python -c "import soundfile; print('  ✅ soundfile installed')" || printf "  $(RED)❌ soundfile missing$(RESET)\n"
 	@$(VENV_BIN)/python -c "import ffmpeg; print('  ✅ ffmpeg-python installed')" || printf "  $(RED)❌ ffmpeg-python missing$(RESET)\n"
 	@$(VENV_BIN)/python -c "import imageio; print('  ✅ imageio installed')" || printf "  $(RED)❌ imageio missing$(RESET)\n"

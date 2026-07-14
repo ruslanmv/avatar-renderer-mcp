@@ -79,17 +79,17 @@ def check_numpy_version() -> bool:
 
 
 def check_librosa_version() -> bool:
-    """Check if librosa version is compatible (==0.9.2)."""
+    """Check if librosa is installed at the version required by chatterbox-tts."""
     try:
         import librosa
         version = librosa.__version__
         
-        if version.startswith('0.9'):
+        if version == '0.11.0':
             print_success(f"librosa                   (version: {version}) - Compatible")
             return True
         else:
             print_warning(f"librosa                   (version: {version}) - May cause issues")
-            print(f"  {Colors.YELLOW}→ Recommended: librosa==0.9.2 for Wav2Lip compatibility{Colors.RESET}")
+            print(f"  {Colors.YELLOW}→ Recommended: librosa==0.11.0 to match chatterbox-tts{Colors.RESET}")
             return True  # Warning, not error
     except ImportError:
         print_error(f"librosa                   - MISSING (required)")
@@ -335,7 +335,7 @@ def check_setup() -> Dict[str, bool]:
                 print(f"     {Colors.BLUE}uv pip install 'numpy<2.0.0'{Colors.RESET}")
             if not librosa_ok:
                 print(f"  3. Fix librosa version:")
-                print(f"     {Colors.BLUE}uv pip install 'librosa==0.9.2'{Colors.RESET}")
+                print(f"     {Colors.BLUE}uv pip install 'librosa==0.11.0'{Colors.RESET}")
             if not guided_diff_ok:
                 print(f"  4. Install guided_diffusion:")
                 print(f"     {Colors.BLUE}uv pip install git+https://github.com/openai/guided-diffusion.git{Colors.RESET}")
