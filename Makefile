@@ -305,7 +305,7 @@ install-external-py: venv ## Install external python deps required by cloned rep
 # Models
 # ─────────────────────────────────────────────────────────────────────────────
 .PHONY: download-models
-download-models: ## Download model checkpoints
+download-models: venv ## Download model checkpoints
 	@printf "$(BLUE)Ensuring models exist in $(MODELS_DIR)...$(RESET)\n"
 	@mkdir -p $(MODELS_DIR)
 	@mkdir -p $(MODELS_DIR)/fomm
@@ -314,7 +314,7 @@ download-models: ## Download model checkpoints
 	@mkdir -p $(MODELS_DIR)/sadtalker
 	@mkdir -p $(MODELS_DIR)/gfpgan
 	@if [ -f "scripts/download_models.sh" ]; then \
-        bash scripts/download_models.sh "$(MODELS_DIR)"; \
+        PYTHON="$(VENV_BIN)/python" bash scripts/download_models.sh "$(MODELS_DIR)"; \
     else \
         printf "$(YELLOW)⚠ scripts/download_models.sh not found.$(RESET)\n"; \
         printf "$(YELLOW)  Models must be downloaded manually to:$(RESET)\n"; \
