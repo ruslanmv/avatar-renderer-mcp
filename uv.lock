@@ -86,7 +86,7 @@ wheels = [
 
 [[package]]
 name = "avatar-renderer-mcp"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "basicsr" },
@@ -194,7 +194,7 @@ requires-dist = [
     { name = "isort", marker = "extra == 'dev'", specifier = ">=5.13.0,<6.0.0" },
     { name = "kafka-python", specifier = ">=2.0.2,<3.0.0" },
     { name = "kornia", specifier = ">=0.7.0,<1.0.0" },
-    { name = "librosa", specifier = "==0.9.2" },
+    { name = "librosa", specifier = "==0.11.0" },
     { name = "mediapipe", specifier = ">=0.10.0,<1.0.0" },
     { name = "mkdocs", marker = "extra == 'dev'", specifier = ">=1.5.0,<2.0.0" },
     { name = "mkdocs-material", marker = "extra == 'dev'", specifier = ">=9.5.0,<10.0.0" },
@@ -1455,7 +1455,7 @@ wheels = [
 
 [[package]]
 name = "librosa"
-version = "0.9.2"
+version = "0.11.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "audioread" },
@@ -1463,18 +1463,17 @@ dependencies = [
     { name = "joblib" },
     { name = "numba" },
     { name = "numpy" },
-    { name = "packaging" },
+    { name = "msgpack", version = "1.1.2", source = { registry = "https://pypi.org/simple" } },
     { name = "pooch" },
-    { name = "resampy" },
-    { name = "scikit-learn", version = "1.7.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scikit-learn", version = "1.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scipy", version = "1.16.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "soxr", version = "1.0.0", source = { registry = "https://pypi.org/simple" } },
+    { name = "typing-extensions" },
     { name = "soundfile" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f1/01/e5935a1fffbc877c94d9ea2eeaabc6b5115e51e787ac46de83adff173475/librosa-0.9.2.tar.gz", hash = "sha256:5b576b5efdce428e90bc988bdd5a953d12a727e5f931f30d74c53b63abbe3c89", size = 200053, upload-time = "2022-06-27T11:26:13.14Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/64/36/360b5aafa0238e29758729e9486c6ed92a6f37fa403b7875e06c115cdf4a/librosa-0.11.0.tar.gz", hash = "sha256:f5ed951ca189b375bbe2e33b2abd7e040ceeee302b9bbaeeffdfddb8d0ace908", size = 327001, upload-time = "2025-03-11T15:09:54.884Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e4/1c/23ef2fd02913d65d43dc7516fc829af709314a66c6f0bdc2e361fdcecc2d/librosa-0.9.2-py3-none-any.whl", hash = "sha256:322a813e6d37af9fbc369e6a637dcf5fdc5c6925ce806a0d27c68de61a81350f", size = 214321, upload-time = "2022-06-27T11:26:04.309Z" },
+    { url = "https://files.pythonhosted.org/packages/b5/ba/c63c5786dfee4c3417094c4b00966e61e4a63efecee22cb7b4c0387dda83/librosa-0.11.0-py3-none-any.whl", hash = "sha256:0b6415c4fd68bff4c29288abe67c6d80b587e0e1e2cfb0aad23e4559504a7fa1", size = 260749, upload-time = "2025-03-11T15:09:52.982Z" },
 ]
 
 [[package]]
@@ -3701,3 +3700,16 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/96/fe/7d0b5c0692b283901b34847f2b2f50d805bfff4b31de4021ac9dfb516d2a/zope_interface-8.1.1-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:eee6f93b2512ec9466cf30c37548fd3ed7bc4436ab29cd5943d7a0b561f14f0f", size = 264281, upload-time = "2025-11-15T08:36:58.968Z" },
     { url = "https://files.pythonhosted.org/packages/2b/2c/a7cebede1cf2757be158bcb151fe533fa951038cfc5007c7597f9f86804b/zope_interface-8.1.1-cp312-cp312-win_amd64.whl", hash = "sha256:80edee6116d569883c58ff8efcecac3b737733d646802036dc337aa839a5f06b", size = 212327, upload-time = "2025-11-15T08:37:00.4Z" },
 ]
+[[package]]
+name = "msgpack"
+version = "1.1.2"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "soxr"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+
