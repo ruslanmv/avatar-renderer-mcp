@@ -1,0 +1,7 @@
+# Keep executable scripts runnable on Linux, macOS, WSL, and GitHub Actions even
+# when contributors clone on Windows or into /mnt/c with core.autocrlf enabled.
+*.sh text eol=lf
+scripts/* text eol=lf
+Makefile text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
