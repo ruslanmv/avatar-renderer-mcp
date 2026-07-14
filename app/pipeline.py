@@ -132,13 +132,18 @@ def _ensure_dir(p: Path) -> None:
 
 def _audio_to_16k_mono(in_audio: str, out_wav: str) -> None:
     """
-    Some pipelines behave better with 16k mono WAV.
+    Convert audio to a 16 kHz mono WAV that Python's wave module can read.
+
+    Some TTS engines emit IEEE-float WAV files (format tag 3). The FOMM
+    wrapper opens the driving audio with the stdlib wave module, which only
+    supports PCM WAV files, so force signed 16-bit PCM here.
     """
     cmd = [
         "ffmpeg", "-y", "-loglevel", "error",
         "-i", in_audio,
         "-ac", "1",
         "-ar", "16000",
+        "-c:a", "pcm_s16le",
         out_wav,
     ]
     subprocess.check_call(cmd)
@@ -722,7 +727,9 @@ def render_pipeline(
 
     # Core FOMM (original — only if no motion driver enhancement took over)
     if not motion_driver_handled:
-        fomm_frames = run_fomm(face_image, audio, reference_video, tmp)
+        fomm_audio = tmp / "fomm_audio_16k_mono_pcm.wav"
+        _audio_to_16k_mono(audio, str(fomm_audio))
+        fomm_frames = run_fomm(face_image, str(fomm_audio), reference_video, tmp)
 
     # ✅ ALWAYS use original high-quality audio for final output
     final_audio = audio
