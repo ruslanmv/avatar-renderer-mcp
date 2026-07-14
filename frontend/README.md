@@ -281,3 +281,25 @@ See parent directory for contribution guidelines.
 For issues and questions:
 - Backend issues: See parent directory README
 - Frontend issues: Create an issue in the repository
+
+## Updating the homepage demo video
+
+The production page at `https://avatar-renderer-mcp.vercel.app/` plays the static
+hero assets from `frontend/public/demo.mp4` and `frontend/public/demo-poster.jpg`.
+From the repository root, regenerate both assets with:
+
+```bash
+make web-demo
+```
+
+To generate and deploy in one step when the Vercel CLI is installed and logged in:
+
+```bash
+make web-demo WEB_DEMO_DEPLOY=1
+```
+
+You can override inputs without editing files:
+
+```bash
+make web-demo WEB_DEMO_IMAGE=tests/assets/alice.png WEB_DEMO_AUDIO=tests/assets/hello.wav WEB_DEMO_QUALITY=real_time
+```
