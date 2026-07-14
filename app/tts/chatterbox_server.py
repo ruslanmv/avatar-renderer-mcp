@@ -36,6 +36,7 @@ from pydantic import BaseModel, Field
 
 # IMPORTANT: Import the multilingual version
 try:
+    import chatterbox.mtl_tts as chatterbox_mtl_tts
     from chatterbox.mtl_tts import ChatterboxMultilingualTTS
 except ImportError:
     print("CRITICAL ERROR: Could not import 'chatterbox.mtl_tts'. Ensure your python path is correct.")
@@ -262,6 +263,32 @@ class ChatterboxServiceMultilingual:
         self._generate_sig_params: Optional[set[str]] = None
 
     @staticmethod
+    def _patch_perth_watermarker() -> None:
+        """
+        Chatterbox can expose perth.PerthImplicitWatermarker as None when the
+        optional Perth package is unavailable or incompatible. Some releases
+        still call it unconditionally during from_pretrained(), causing startup
+        to fail before the TTS health endpoint is available. Replace the missing
+        constructor with a no-op watermarker so speech generation can proceed.
+        """
+
+        class _NoOpWatermarker:
+            def apply_watermark(self, audio, *args, **kwargs):  # noqa: ANN001
+                return audio
+
+            def watermark(self, audio, *args, **kwargs):  # noqa: ANN001
+                return audio
+
+            def __call__(self, audio, *args, **kwargs):  # noqa: ANN001
+                return audio
+
+        perth_module = getattr(chatterbox_mtl_tts, "perth", None)
+        watermarker = getattr(perth_module, "PerthImplicitWatermarker", None)
+        if perth_module is not None and not callable(watermarker):
+            perth_module.PerthImplicitWatermarker = _NoOpWatermarker
+            logger.warning("🩹 PerthImplicitWatermarker unavailable; using no-op watermarking.")
+
+    @staticmethod
     def _patch_alignment_stream_analyzer() -> None:
         """
         Prevent "one-word" outputs caused by AlignmentStreamAnalyzer forcing EOS when it detects repetition.
@@ -323,6 +350,7 @@ class ChatterboxServiceMultilingual:
             try:
                 # Patch BEFORE model instantiation
                 self._patch_alignment_stream_analyzer()
+                self._patch_perth_watermarker()
 
                 fp_kwargs = self._from_pretrained_kwargs()
                 if fp_kwargs.get("attn_implementation"):
