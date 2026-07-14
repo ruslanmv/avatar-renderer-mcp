@@ -21,6 +21,8 @@ export interface GenerateOptions {
   pitch?: number; // -20..20 (Hz)
   quality?: string;
   enhancements?: string[];
+  /** Rendering method: wav2lip_gfpgan | fullface | wav2lip | simple | auto */
+  method?: string;
   /** HF token → run on the user's own ZeroGPU quota. */
   hfToken?: string;
 }
@@ -46,6 +48,7 @@ export async function generateAvatar(opts: GenerateOptions): Promise<string> {
     opts.pitch ?? 0,
     opts.quality ?? 'auto',
     opts.enhancements ?? [],
+    opts.method ?? 'wav2lip_fast',
   ]);
 
   // Gradio 5's Video output is { video: <FileData|str>, subtitles }. Normalize

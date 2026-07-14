@@ -102,19 +102,42 @@ def synthesize_tts(text: str, voice: str, speed_pct: int, pitch_hz: int) -> str:
     return out
 
 
+# Lip-sync engine selector. The "pipeline" engines (MuseTalk/LatentSync/Diff2Lip/
+# Wav2Lip-pipeline) restore the dev-v0.1.25 high-quality path and require the full
+# GPU build (external repos + weights). The in-process engines run on this Space.
+METHOD_CHOICES = [
+    ("Auto — best available engine", "auto"),
+    ("LatentSync — premium diffusion (GPU build)", "latentsync"),
+    ("MuseTalk — premium real-time (GPU build)", "musetalk"),
+    ("Diff2Lip — diffusion lip-sync (GPU build)", "diff2lip"),
+    ("Wav2Lip — pipeline (research license, GPU build)", "wav2lip"),
+    ("Wav2Lip — full-face + GFPGAN (this Space) ⭐", "wav2lip_fast"),
+    ("Wav2Lip raw — full-face, no restore (this Space)", "wav2lip_raw"),
+    ("Wav2Lip band — mouth-band, anti-flicker (this Space)", "wav2lip_band"),
+    ("Full-face — head motion, static bg (this Space)", "fullface"),
+    ("Simple — no lip-sync", "simple"),
+]
+
+
 @gpu
-def _gpu_render(image_path: str, audio_path: str, addons) -> str:
-    """GPU-allocated render (Wav2Lip + GFPGAN + add-ons)."""
+def _gpu_render(image_path: str, audio_path: str, addons, engine, quality_mode) -> str:
+    """GPU-allocated render via the multi-engine orchestrator."""
+    from app.render import orchestrate
+
+    engine = (engine or "auto")
+    # Naturalness add-ons (head motion / blink) are delivered by the in-process
+    # "fullface" engine, so route there when requested on an in-process tier.
+    if addons and engine in ("auto", "wav2lip_fast"):
+        engine = "fullface"
+
     out_path = str(_OUT_DIR / f"{uuid.uuid4()}.mp4")
-    return render(
-        face_image=image_path,
-        audio=audio_path,
-        out_path=out_path,
-        enhancements=(addons or None),
+    return orchestrate(
+        face_image=image_path, audio=audio_path, out_path=out_path,
+        quality_mode=(quality_mode or "standard"), engine=engine,
     )
 
 
-def generate(image_path, audio_path, text, voice, speed, pitch, quality_mode, addons):
+def generate(image_path, audio_path, text, voice, speed, pitch, quality_mode, addons, method="auto"):
     """UI/API handler: optional TTS from text, then GPU lip-sync render.
 
     Audio source: if `text` is provided it is synthesized (edge-tts) and used;
@@ -137,7 +160,7 @@ def generate(image_path, audio_path, text, voice, speed, pitch, quality_mode, ad
     addons = [label_to_id.get(a, a) for a in (addons or [])]
 
     try:
-        return _gpu_render(image_path, audio_path, addons)
+        return _gpu_render(image_path, audio_path, addons, method or "auto", quality_mode or "standard")
     except Exception as exc:
         raise gr.Error(f"Rendering failed: {exc}") from exc
 
@@ -177,7 +200,15 @@ def build_ui() -> gr.Blocks:
                     audio = gr.Audio(type="filepath", label="Audio (used if no text above)")
 
                 quality = gr.Dropdown(
-                    choices=["auto", "real_time", "high_quality"], value="auto", label="Quality mode"
+                    choices=["preview", "real_time", "standard", "high_quality", "premium", "cinematic", "auto"],
+                    value="standard",
+                    label="Quality tier",
+                    info="Strict tiers (high_quality/premium/cinematic) never deliver a degraded fallback.",
+                )
+                method = gr.Dropdown(
+                    choices=METHOD_CHOICES, value="wav2lip_fast", label="Lip-sync engine",
+                    info="Premium engines (MuseTalk/LatentSync/Diff2Lip) need the full GPU build; "
+                         "in-process engines run on this ZeroGPU Space.",
                 )
                 addons = gr.CheckboxGroup(
                     choices=ADDON_CHOICES,
@@ -202,7 +233,7 @@ def build_ui() -> gr.Blocks:
 
         btn.click(
             generate,
-            inputs=[image, audio, text, voice, speed, pitch, quality, addons],
+            inputs=[image, audio, text, voice, speed, pitch, quality, addons, method],
             outputs=out,
             api_name="predict",
         )

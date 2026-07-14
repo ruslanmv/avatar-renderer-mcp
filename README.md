@@ -84,6 +84,37 @@ The **Auto** mode (default) picks the right one for you.
 
 ---
 
+## Generation Methods
+
+Pick a lip-sync engine per request (or `auto`); strict tiers never silently downgrade.
+
+- **In-process (ZeroGPU / CPU)** — run on the preview Space:
+  - `simple` — static portrait + audio (no lip-sync; preview only)
+  - `wav2lip_fast` — full-face Wav2Lip + per-frame GFPGAN (the faithful dev-v0.1.25 path); default for `standard`/`high_quality`
+  - `wav2lip_raw` — full-face Wav2Lip without restoration
+  - `wav2lip_band` — mouth-band blend on a GFPGAN'd static base (anti-flicker)
+  - `fullface` — adds subtle head motion + blink (static background)
+- **Premium pipeline (GPU build / Colab)** — diffusion / latent lip-sync:
+  `diff2lip`, `musetalk`, `latentsync`. Run them on a real GPU with the notebook below.
+
+### Premium engines (MuseTalk · LatentSync · Diff2Lip) on a Colab GPU
+
+[![Open premium notebook In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ruslanmv/avatar-renderer-mcp/blob/main/demo_colab_premium.ipynb)
+&nbsp;`demo_colab_premium.ipynb`
+
+The premium engines can't run on the ZeroGPU Space (it only GPU-accelerates
+in-process code; these run as subprocesses needing their own repos + weights).
+The notebook installs MuseTalk/Diff2Lip/FOMM (+ optional LatentSync) and renders
+through the same `orchestrate()` engine selector used in production. **Free T4**
+runs MuseTalk + Diff2Lip + Wav2Lip; **LatentSync** needs an A100/L4 (Colab Pro).
+See [`COLAB_SETUP.md`](COLAB_SETUP.md).
+
+> **Status:** `diff2lip`/`musetalk` now run end-to-end on a Colab T4 (FOMM motion →
+> lip-sync → GFPGAN, no crashes); their mouth-motion compositing is still being
+> finished. The Wav2Lip-family engines are the recommended, verified path today.
+
+---
+
 ## 10 Enhancement Modules
 
 <img src="docs/enhancements-banner.svg" alt="Enhancement Modules" width="800"/>
