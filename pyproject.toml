@@ -9,7 +9,7 @@
 
 [project]
 name = "avatar-renderer-mcp"
-version = "0.1.0"
+version = "0.1.1"
 description = "Production-ready avatar renderer with FOMM, Diff2Lip, and Wav2Lip pipeline featuring MCP STDIO integration for AI-agent communication"
 readme = "README.md"
 license = { text = "Apache-2.0" }
