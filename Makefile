@@ -346,7 +346,7 @@ verify: venv ## Verify all dependencies are installed
 	@$(VENV_BIN)/python -c "import numpy as np; print('  ✅ numpy:', np.__version__, '(must be <2.0.0)')" || printf "  $(RED)❌ numpy missing$(RESET)\n"
 	
 	@printf "\n$(BOLD)Audio/Video Processing:$(RESET)\n"
-	@$(VENV_BIN)/python -c "import librosa; print('  ✅ librosa:', librosa.__version__, '(must be 0.9.x)')" 2>/dev/null || printf "  $(RED)❌ librosa missing$(RESET)\n"
+	@$(VENV_BIN)/python -c "import librosa; print('  ✅ librosa:', librosa.__version__, '(aligned with chatterbox-tts)')" 2>/dev/null || printf "  $(RED)❌ librosa missing$(RESET)\n"
 	@$(VENV_BIN)/python -c "import soundfile; print('  ✅ soundfile installed')" || printf "  $(RED)❌ soundfile missing$(RESET)\n"
 	@$(VENV_BIN)/python -c "import ffmpeg; print('  ✅ ffmpeg-python installed')" || printf "  $(RED)❌ ffmpeg-python missing$(RESET)\n"
 	@$(VENV_BIN)/python -c "import imageio; print('  ✅ imageio installed')" || printf "  $(RED)❌ imageio missing$(RESET)\n"
