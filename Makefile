@@ -316,7 +316,7 @@ download-models: venv ## Download model checkpoints
 	@if [ -f "scripts/download_models.sh" ]; then \
         PYTHON="$(VENV_BIN)/python" bash scripts/download_models.sh "$(MODELS_DIR)"; \
     else \
-        printf "$(YELLOW)⚠ scripts/download_models.sh not found.$(RESET)\n"; \
+        printf "$(YELLOW)⚠ scripts/download_models.py not found.$(RESET)\n"; \
         printf "$(YELLOW)  Models must be downloaded manually to:$(RESET)\n"; \
         printf "$(YELLOW)    - $(MODELS_DIR)/fomm/vox-cpk.pth$(RESET)\n"; \
         printf "$(YELLOW)    - $(MODELS_DIR)/wav2lip/wav2lip_gan.pth$(RESET)\n"; \
