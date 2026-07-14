@@ -296,8 +296,29 @@ class ChatterboxServiceMultilingual:
 
     @staticmethod
     def _patch_perth_watermarker() -> None:
-        """Ensure Chatterbox can construct a watermarker before model loading."""
-        _patch_perth_watermarker_module()
+        """
+        Chatterbox can expose perth.PerthImplicitWatermarker as None when the
+        optional Perth package is unavailable or incompatible. Some releases
+        still call it unconditionally during from_pretrained(), causing startup
+        to fail before the TTS health endpoint is available. Replace the missing
+        constructor with a no-op watermarker so speech generation can proceed.
+        """
+
+        class _NoOpWatermarker:
+            def apply_watermark(self, audio, *args, **kwargs):  # noqa: ANN001
+                return audio
+
+            def watermark(self, audio, *args, **kwargs):  # noqa: ANN001
+                return audio
+
+            def __call__(self, audio, *args, **kwargs):  # noqa: ANN001
+                return audio
+
+        perth_module = getattr(chatterbox_mtl_tts, "perth", None)
+        watermarker = getattr(perth_module, "PerthImplicitWatermarker", None)
+        if perth_module is not None and not callable(watermarker):
+            perth_module.PerthImplicitWatermarker = _NoOpWatermarker
+            logger.warning("🩹 PerthImplicitWatermarker unavailable; using no-op watermarking.")
 
     @staticmethod
     def _patch_alignment_stream_analyzer() -> None:

@@ -314,8 +314,8 @@ download-models: venv ## Download model checkpoints
 	@mkdir -p $(MODELS_DIR)/wav2lip
 	@mkdir -p $(MODELS_DIR)/sadtalker
 	@mkdir -p $(MODELS_DIR)/gfpgan
-	@if [ -f "scripts/download_models.py" ]; then \
-        PYTHON="$(VENV_BIN)/python" "$(VENV_BIN)/python" scripts/download_models.py "$(MODELS_DIR)"; \
+	@if [ -f "scripts/download_models.sh" ]; then \
+        PYTHON="$(VENV_BIN)/python" bash scripts/download_models.sh "$(MODELS_DIR)"; \
     else \
         printf "$(YELLOW)⚠ scripts/download_models.py not found.$(RESET)\n"; \
         printf "$(YELLOW)  Models must be downloaded manually to:$(RESET)\n"; \
