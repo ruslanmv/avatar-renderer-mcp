@@ -26,10 +26,7 @@ EXT_DEPS_DIR  ?= external_deps
 MODELS_DIR    ?= $(CURDIR)/models
 IMAGE         ?= avatar-renderer:latest
 WEB_DEMO_IMAGE ?= tests/assets/alice.png
-WEB_DEMO_AUDIO ?= output/web-demo-narration.mp3
-WEB_DEMO_TEXT ?= Welcome to Avatar Renderer MCP. Turn any product photo, teacher, support agent, or character into a speaking video in minutes. Pick an avatar, type your message, choose a voice, and render on Hugging Face powered GPU infrastructure.
-WEB_DEMO_VOICE ?= en-US-AriaNeural
-WEB_DEMO_GENERATE_AUDIO ?= 1
+WEB_DEMO_AUDIO ?= tests/assets/hello.wav
 WEB_DEMO_OUT   ?= frontend/public/demo.mp4
 WEB_DEMO_POSTER ?= frontend/public/demo-poster.jpg
 WEB_DEMO_QUALITY ?= real_time
@@ -478,20 +475,7 @@ demo: install ## Run demo script
 .PHONY: web-demo
 web-demo: install ## Generate/update the Vercel homepage demo video asset
 	@printf "$(BOLD)$(BLUE)Generating Vercel homepage demo video...$(RESET)\n"
-	@mkdir -p $$(dirname $(WEB_DEMO_OUT)) $$(dirname $(WEB_DEMO_AUDIO))
-	@if [ "$(WEB_DEMO_GENERATE_AUDIO)" = "1" ]; then \
-        printf "$(BLUE)Generating marketing narration...$(RESET)\n"; \
-        $(UV) pip install --python $(VENV_BIN)/python edge-tts >/tmp/avatar-web-demo-edge-tts.log 2>&1 || { \
-            printf "$(RED)✗ Could not install edge-tts; see /tmp/avatar-web-demo-edge-tts.log$(RESET)\n"; \
-            exit 1; \
-        }; \
-        $(VENV_BIN)/python scripts/generate_web_demo_audio.py \
-            --text "$(WEB_DEMO_TEXT)" \
-            --voice $(WEB_DEMO_VOICE) \
-            --out $(WEB_DEMO_AUDIO); \
-    else \
-        printf "$(BLUE)Using existing narration: $(WEB_DEMO_AUDIO)$(RESET)\n"; \
-    fi
+	@mkdir -p $$(dirname $(WEB_DEMO_OUT))
 	@PYTHONPATH=$(CURDIR)/$(EXT_DEPS_DIR):$(PYTHONPATH) \
         MODEL_ROOT=$(MODELS_DIR) \
         EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
@@ -520,6 +504,79 @@ web-demo: install ## Generate/update the Vercel homepage demo video asset
     else \
         printf "$(YELLOW)Next: commit the updated assets and deploy frontend/ to Vercel.$(RESET)\n"; \
         printf "$(YELLOW)      Or run: make web-demo WEB_DEMO_DEPLOY=1$(RESET)\n"; \
+    fi
+
+.PHONY: gui
+gui: install ## Start Backend (8000) + TTS (4123) + Desktop GUI
+	@printf "$(BOLD)$(BLUE)Starting Avatar Renderer GUI (Full Stack)...$(RESET)\n\n"
+	
+	@printf "$(BLUE)Step 1: Starting TTS Server (Port 4123)...$(RESET)\n"
+	@PYTHONPATH=$(CURDIR)/$(EXT_DEPS_DIR):$(PYTHONPATH) \
+        MODEL_ROOT=$(MODELS_DIR) \
+        EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
+        $(VENV_BIN)/uvicorn app.tts.chatterbox_server:app --host 0.0.0.0 --port 4123 > /tmp/avatar-tts.log 2>&1 & \
+        echo $$! > /tmp/avatar-tts.pid
+	
+	@printf "$(BLUE)Step 2: Starting Backend Server (Port 8000)...$(RESET)\n"
+	@PYTHONPATH=$(CURDIR)/$(EXT_DEPS_DIR):$(PYTHONPATH) \
+        MODEL_ROOT=$(MODELS_DIR) \
+        EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
+        $(VENV_BIN)/python demo.py \
+        --image $(WEB_DEMO_IMAGE) \
+        --audio $(WEB_DEMO_AUDIO) \
+        --out $(WEB_DEMO_OUT) \
+        --quality $(WEB_DEMO_QUALITY) \
+        --wav2lip
+	@printf "$(BLUE)Updating poster image...$(RESET)\n"
+	@ffmpeg -y -ss 00:00:01 -i $(WEB_DEMO_OUT) -frames:v 1 -q:v 2 $(WEB_DEMO_POSTER) >/tmp/avatar-web-demo-poster.log 2>&1 || { \
+        printf "$(YELLOW)⚠ Could not generate poster; see /tmp/avatar-web-demo-poster.log$(RESET)\n"; \
+        true; \
+    }
+	@printf "$(GREEN)✓ Updated frontend hero video: $(WEB_DEMO_OUT)$(RESET)\n"
+	@printf "$(GREEN)✓ Updated frontend poster: $(WEB_DEMO_POSTER)$(RESET)\n"
+	@if [ "$(WEB_DEMO_DEPLOY)" = "1" ]; then \
+        if command -v vercel >/dev/null 2>&1; then \
+            printf "$(BLUE)Deploying frontend to Vercel...$(RESET)\n"; \
+            cd frontend && vercel --prod; \
+        else \
+            printf "$(YELLOW)⚠ WEB_DEMO_DEPLOY=1 requested but vercel CLI is not installed.$(RESET)\n"; \
+            printf "$(YELLOW)  Install with: npm i -g vercel$(RESET)\n"; \
+            exit 1; \
+        fi; \
+    done
+	
+	@IS_WSL=0; \
+    if [ -r /proc/version ] && grep -qi microsoft /proc/version; then IS_WSL=1; fi; \
+    if [ "$$IS_WSL" = "1" ] && [ "$${FORCE_DESKTOP_GUI:-0}" != "1" ]; then \
+        printf "$(YELLOW)WSL detected: desktop Tk GUI is unstable under WSLg/X11 on this setup.$(RESET)\n"; \
+        printf "$(BLUE)Step 4: Launching Modern Web UI instead...$(RESET)\n\n"; \
+        printf "$(YELLOW)Tip: set FORCE_DESKTOP_GUI=1 to try the Tk GUI anyway.$(RESET)\n"; \
+        $(UV) pip install --python $(VENV_BIN)/python -e ".[launcher]"; \
+        PYTHONPATH=$(CURDIR)/$(EXT_DEPS_DIR):$(PYTHONPATH) \
+        MODEL_ROOT=$(MODELS_DIR) \
+        EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
+        API_URL=http://localhost:8000 \
+        LAUNCHER_MODE=$${LAUNCHER_MODE:-default} \
+        $(VENV_BIN)/python -m launcher || true; \
+    else \
+        printf "$(BLUE)Step 4: Launching Desktop GUI...$(RESET)\n\n"; \
+        PYTHONPATH=$(CURDIR)/$(EXT_DEPS_DIR):$(PYTHONPATH) \
+        MODEL_ROOT=$(MODELS_DIR) \
+        EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
+        API_URL=http://localhost:8000 \
+        CHATTERBOX_URL=http://localhost:4123 \
+        $(VENV_BIN)/python -m gui || true; \
+    fi
+	
+	@# Cleanup
+	@printf "\n$(BLUE)Stopping background services...$(RESET)\n"
+	@if [ -f /tmp/avatar-backend.pid ]; then \
+        kill $$(cat /tmp/avatar-backend.pid) 2>/dev/null || true; \
+        rm -f /tmp/avatar-backend.pid; \
+    fi
+	@if [ -f /tmp/avatar-tts.pid ]; then \
+        kill $$(cat /tmp/avatar-tts.pid) 2>/dev/null || true; \
+        rm -f /tmp/avatar-tts.pid; \
     fi
 
 .PHONY: gui
