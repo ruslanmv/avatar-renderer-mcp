@@ -256,7 +256,7 @@ install-external-py: venv ## Install external python deps required by cloned rep
         --reinstall-package setuptools \
         "setuptools>=68.0.0" \
         wheel \
-        "librosa==0.9.2" \
+        "librosa==0.11.0" \
         "soundfile>=0.12.0,<0.13.0" \
         "numba>=0.58.0" \
         || { printf "$(RED)✗ Audio deps failed$(RESET)\n"; exit 1; }
