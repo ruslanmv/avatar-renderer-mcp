@@ -43,7 +43,21 @@ def initialize_x11_threading():
         os.environ['MPLBACKEND'] = 'Agg'  # Non-interactive matplotlib backend
         os.environ['QT_X11_NO_MITSHM'] = '1'  # Disable problematic X11 extension
 
-        # Initialize X11 threading FIRST
+        # WSLg/Tk can abort inside libX11/xcb when XInitThreads() is forced:
+        #   [xcb] Unknown sequence number while appending request
+        #   [xcb] You called XInitThreads, this is not your fault
+        # Tkinter itself is single-threaded, so the safest default is to avoid
+        # XInitThreads on WSL and marshal all widget updates through Tk.after().
+        if is_wsl and os.getenv('AVATAR_GUI_XINITTHREADS') != '1':
+            print("[INFO] WSL detected; skipping XInitThreads to avoid WSLg XCB abort")
+            print("[INFO] Set AVATAR_GUI_XINITTHREADS=1 to force legacy XInitThreads behavior")
+            return
+
+        # Initialize X11 threading FIRST for non-WSL Linux, unless explicitly disabled.
+        if os.getenv('AVATAR_GUI_XINITTHREADS') == '0':
+            print("[INFO] XInitThreads disabled by AVATAR_GUI_XINITTHREADS=0")
+            return
+
         try:
             x11_lib = ctypes.util.find_library('X11')
             if x11_lib:
@@ -405,13 +419,17 @@ class AvatarGeneratorGUI(tk.Tk):
         self.progress_bar.start(10)
         self.status_var.set("Generating Audio...")
 
-        threading.Thread(target=self._worker_audio, args=(text,), daemon=True).start()
+        lang = self._get_lang_code()
+        voice_data = VOICE_PROFILES[self.voice_var.get()]
 
-    def _worker_audio(self, text):
+        threading.Thread(
+            target=self._worker_audio,
+            args=(text, lang, voice_data),
+            daemon=True,
+        ).start()
+
+    def _worker_audio(self, text, lang, voice_data):
         try:
-            lang = self._get_lang_code()
-            voice_data = VOICE_PROFILES[self.voice_var.get()]
-
             payload = {
                 "text": text, "language": lang,
                 "voice": voice_data["voice"], "temperature": voice_data["temperature"],
@@ -476,9 +494,17 @@ class AvatarGeneratorGUI(tk.Tk):
         # Switch to log tab
         self.notebook.select(2)
 
-        threading.Thread(target=self._worker_render, daemon=True).start()
+        q_mode = QUALITY_MODES[self.quality_var.get()]
+        avatar_image_path = Path(self.avatar_image_path)
+        generated_audio_path = Path(self.generated_audio_path)
 
-    def _worker_render(self):
+        threading.Thread(
+            target=self._worker_render,
+            args=(q_mode, avatar_image_path, generated_audio_path),
+            daemon=True,
+        ).start()
+
+    def _worker_render(self, q_mode, avatar_image_path, generated_audio_path):
         try:
             self.after(0, lambda: self._log("Initializing pipeline... (First run takes ~10s)"))
 
@@ -494,16 +520,14 @@ class AvatarGeneratorGUI(tk.Tk):
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             video_out = OUTPUT_DIR / f"avatar_{timestamp}.mp4"
 
-            q_mode = QUALITY_MODES[self.quality_var.get()]
-
             self.after(0, lambda: self._log(f"Starting render: {q_mode}"))
-            self.after(0, lambda: self._log(f"Image: {Path(self.avatar_image_path).name}"))
+            self.after(0, lambda: self._log(f"Image: {avatar_image_path.name}"))
             self.after(0, lambda: self._log("Processing..."))
 
             # RUN PIPELINE
             result_path = render_pipeline(
-                face_image=str(self.avatar_image_path),
-                audio=str(self.generated_audio_path),
+                face_image=str(avatar_image_path),
+                audio=str(generated_audio_path),
                 out_path=str(video_out),
                 quality_mode=q_mode
             )

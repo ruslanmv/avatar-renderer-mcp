@@ -26,6 +26,8 @@ from typing import Optional, Any, Tuple, List
 
 import torch
 
+from .wav2lip_compat import patch_wav2lip_audio_for_librosa
+
 log = logging.getLogger("avatar-renderer.pipeline")
 
 # --------------------------------------------------------------------------- #
@@ -490,6 +492,10 @@ def run_wav2lip(frames_dir: Path, audio_wav: str, tmp_dir: Path) -> Path:
     if not _ffmpeg_binary_available():
         log.warning("[pipeline] ffmpeg not available; returning frames without lip-sync.")
         return frames_dir
+
+    # Keep the vendored Wav2Lip subprocess compatible with librosa >= 0.10,
+    # where librosa.filters.mel requires sr/n_fft to be keyword arguments.
+    patch_wav2lip_audio_for_librosa(wav2lip_dir)
 
     silent_vid = tmp_dir / "wav2lip_input.mp4"
     out_vid = tmp_dir / "wav2lip_out.mp4"
