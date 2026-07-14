@@ -314,7 +314,7 @@ download-models: venv ## Download model checkpoints
 	@mkdir -p $(MODELS_DIR)/sadtalker
 	@mkdir -p $(MODELS_DIR)/gfpgan
 	@if [ -f "scripts/download_models.sh" ]; then \
-        tr -d "\r" < scripts/download_models.sh | PYTHON="$(VENV_BIN)/python" bash -s -- "$(MODELS_DIR)"; \
+        PYTHON="$(VENV_BIN)/python" bash scripts/download_models.sh "$(MODELS_DIR)"; \
     else \
         printf "$(YELLOW)⚠ scripts/download_models.sh not found.$(RESET)\n"; \
         printf "$(YELLOW)  Models must be downloaded manually to:$(RESET)\n"; \
