@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import importlib
 import inspect
 import logging
 import os
 import re
 import threading
 import time
+import types
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
@@ -46,6 +48,36 @@ except ImportError:
 # Configuration
 # -----------------------------------------------------------------------------
 logger = logging.getLogger("vr_chatterbox_server_multilingual")
+
+
+class _NoOpWatermarker:
+    def apply_watermark(self, audio, *args, **kwargs):  # noqa: ANN001
+        return audio
+
+    def watermark(self, audio, *args, **kwargs):  # noqa: ANN001
+        return audio
+
+    def __call__(self, audio, *args, **kwargs):  # noqa: ANN001
+        return audio
+
+
+def _patch_perth_watermarker_module() -> None:
+    """Patch Chatterbox/Perth watermarking when the optional constructor is missing."""
+    perth_module = getattr(chatterbox_mtl_tts, "perth", None)
+    if perth_module is None and importlib.util.find_spec("perth") is not None:
+        perth_module = importlib.import_module("perth")
+
+    if perth_module is None:
+        perth_module = types.SimpleNamespace()
+
+    watermarker = getattr(perth_module, "PerthImplicitWatermarker", None)
+    if not callable(watermarker):
+        perth_module.PerthImplicitWatermarker = _NoOpWatermarker
+        chatterbox_mtl_tts.perth = perth_module
+        logger.warning("🩹 PerthImplicitWatermarker unavailable; using no-op watermarking.")
+
+
+_patch_perth_watermarker_module()
 
 SUPPORTED_LANGUAGES = {
     "ar": "Arabic", "da": "Danish", "de": "German", "el": "Greek", "en": "English",
