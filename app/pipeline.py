@@ -151,6 +151,9 @@ def _make_silent_video_from_frames(frames_dir: Path, out_mp4: Path, fps: int = 2
         "-r", str(fps),
         "-i", str(frames_dir / "%04d.png"),
         "-an",
+        # H.264 yuv420p requires even dimensions; frame sequences can inherit
+        # odd portrait sizes, so pad by at most one pixel before encoding.
+        "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2",
         "-c:v", "libx264",
         "-pix_fmt", "yuv420p",
         str(out_mp4),
@@ -596,6 +599,9 @@ def encode_mp4(frames_dir: Path, audio_wav: str, out_mp4: str, fps: int = 25) ->
         "-r", str(fps),
         "-i", f"{frames_dir}/%04d.png",
         "-i", audio_wav,
+        # H.264 yuv420p requires even dimensions; final frame directories can
+        # contain odd-sized images, so pad by at most one pixel before encoding.
+        "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2",
         "-c:v", "libx264",
         "-preset", "fast",
         "-crf", "23",

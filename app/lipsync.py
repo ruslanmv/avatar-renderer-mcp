@@ -334,6 +334,10 @@ def wav2lip_render(
             "-framerate", str(FPS), "-i", str(final_dir / "%05d.png"),
             "-i", audio_for_mux,
             "-map", "0:v:0", "-map", "1:a:0",
+            # H.264 yuv420p requires even dimensions. Uploaded portraits can be
+            # odd-sized (for example 433x433), so pad by at most one pixel
+            # instead of letting libx264 fail and falling back to non-lipsync.
+            "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2",
             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20",
             "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart",
             out_path,
