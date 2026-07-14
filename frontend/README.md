@@ -281,3 +281,35 @@ See parent directory for contribution guidelines.
 For issues and questions:
 - Backend issues: See parent directory README
 - Frontend issues: Create an issue in the repository
+
+## Updating the homepage demo video
+
+The production page at `https://avatar-renderer-mcp.vercel.app/` plays the static
+hero assets from `frontend/public/demo.mp4` and `frontend/public/demo-poster.jpg`.
+From the repository root, regenerate both assets with:
+
+```bash
+make web-demo
+```
+
+To generate and deploy in one step when the Vercel CLI is installed and logged in:
+
+```bash
+make web-demo WEB_DEMO_DEPLOY=1
+```
+
+By default, `make web-demo` synthesizes a commercial narration with `edge-tts` instead of reusing the short `hello.wav` test clip. You can override the script, voice, image, or audio without editing files:
+
+```bash
+make web-demo \
+  WEB_DEMO_TEXT="Welcome to Avatar Renderer MCP. Create product demos, training videos, and AI support avatars from one image." \
+  WEB_DEMO_VOICE=en-US-AriaNeural \
+  WEB_DEMO_IMAGE=tests/assets/alice.png \
+  WEB_DEMO_QUALITY=real_time
+```
+
+If you already have final narration, override `WEB_DEMO_AUDIO` and disable audio synthesis:
+
+```bash
+make web-demo WEB_DEMO_GENERATE_AUDIO=0 WEB_DEMO_AUDIO=path/to/commercial-narration.wav
+```

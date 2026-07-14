@@ -350,6 +350,25 @@ def get_sample_text(language: str, sample_type: str):
     samples = SAMPLE_TEXTS.get(language, SAMPLE_TEXTS.get("en", {}))
     return samples.get(sample_type, "")
 
+def _running_under_wsl() -> bool:
+    try:
+        return "microsoft" in Path("/proc/version").read_text().lower()
+    except OSError:
+        return False
+
+
+def _launcher_mode() -> str:
+    mode = os.getenv("LAUNCHER_MODE")
+    if mode:
+        return mode
+    # WSLg can crash native X11/Tk clients with xcb assertions. Use the default
+    # browser integration in WSL so the UI can open in Windows/WSLg without
+    # forcing Eel's Chrome-specific Linux window mode.
+    if _running_under_wsl():
+        return "default"
+    return "chrome"
+
+
 # ============================================================================
 # Main
 # ============================================================================
@@ -365,12 +384,15 @@ def main():
                 try: f.unlink()
                 except: pass
 
+        mode = _launcher_mode()
+        print(f"[INFO] Launcher URL: http://localhost:8080/index.html")
+        print(f"[INFO] Browser mode: {mode}")
         eel.start(
             'index.html',
             size=(1280, 850),
             port=8080,
-            mode='chrome',
-            cmdline_args=['--disable-http-cache'] 
+            mode=mode,
+            cmdline_args=['--disable-http-cache']
         )
     except Exception as e:
         print(f"[FATAL] {e}")

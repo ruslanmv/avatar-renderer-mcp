@@ -29,6 +29,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from .wav2lip_compat import patch_wav2lip_audio_for_librosa
+
 log = logging.getLogger("avatar-renderer.lipsync")
 
 WAV2LIP_REPO = os.getenv("WAV2LIP_REPO", "https://github.com/Rudrabha/Wav2Lip")
@@ -67,18 +69,7 @@ def _setup() -> Path:
 
     # Make Wav2Lip's audio.py compatible with modern librosa (>=0.10), which made
     # librosa.filters.mel keyword-only. The repo calls it positionally.
-    audio_py = WAV2LIP_DIR / "audio.py"
-    try:
-        t = audio_py.read_text()
-        if "librosa.filters.mel(hp.sample_rate, hp.n_fft," in t:
-            t = t.replace(
-                "librosa.filters.mel(hp.sample_rate, hp.n_fft,",
-                "librosa.filters.mel(sr=hp.sample_rate, n_fft=hp.n_fft,",
-            )
-            audio_py.write_text(t)
-            log.info("Patched Wav2Lip audio.py for modern librosa.")
-    except Exception as exc:  # non-fatal; may already be compatible
-        log.warning("Could not patch Wav2Lip audio.py: %s", exc)
+    patch_wav2lip_audio_for_librosa(WAV2LIP_DIR)
 
     LIPSYNC_CACHE.mkdir(parents=True, exist_ok=True)
     ckpt = LIPSYNC_CACHE / "wav2lip_gan.pth"
@@ -157,6 +148,7 @@ def _get_gfpgan(device: str):
 
 def _load_model(ckpt: Path, device: str):
     import torch
+
     from models import Wav2Lip  # from the cloned repo
 
     model = Wav2Lip()

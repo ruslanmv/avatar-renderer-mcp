@@ -1,4 +1,15 @@
-# Avatar Renderer GUI
+# Avatar Renderer GUI (Deprecated)
+
+> **Deprecated:** This legacy Tk desktop GUI is no longer the supported product UI.
+> Use the modern web launcher instead:
+>
+> ```bash
+> make launch
+> ```
+>
+> The Tk GUI is kept only for low-level debugging and may be removed in a future release.
+
+## Legacy documentation
 
 A graphical user interface for generating talking avatar videos from text input.
 
@@ -27,14 +38,18 @@ First, start the FastAPI server:
 uvicorn app.api:app --host 0.0.0.0 --port 8000
 ```
 
-### 2. Run the GUI
+### 2. Run the legacy GUI for debugging only
+
+For normal use, run:
 
 ```bash
-# From project root
-python gui/avatar_gui.py
+make launch
+```
 
-# Or use the launcher
-python -m gui.avatar_gui
+If you are debugging the deprecated Tk module directly, run:
+
+```bash
+python -m gui
 ```
 
 ## Quick Start

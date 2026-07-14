@@ -2,22 +2,23 @@
 
 A simple step-by-step guide for creating AI-powered talking avatar videos.
 
-Avatar Renderer MCP offers **two interfaces** to create your videos. Choose whichever works best for you:
+Avatar Renderer MCP now supports one primary local interface:
 
-- **Desktop App** (AvatarStudio) - a native desktop window for local use
-- **Web App** (Next.js) - a modern browser-based interface
+- **Modern Web Launcher** - the supported browser-based studio for local use
+
+The old Tk desktop GUI is deprecated because it has an outdated design and is unstable on WSL/X11. Use `make launch` for all normal local UI work.
 
 ---
 
-## Option A: Desktop App (AvatarStudio)
+## Option A: Modern Web Launcher
 
 ### Starting the App
 
 ```bash
-python launcher/app.py
+make launch
 ```
 
-A desktop window will open with a sidebar on the left and three panels on the right.
+A browser-based studio will open with controls for text-to-speech, avatar selection, enhancements, and rendering.
 
 ---
 
