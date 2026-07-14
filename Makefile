@@ -254,7 +254,7 @@ install-external-py: venv ## Install external python deps required by cloned rep
 	@printf "$(BLUE)→ Installing audio processing stack...$(RESET)\n"
 	@$(UV) pip install --python $(VENV_BIN)/python \
         --reinstall-package setuptools \
-        "setuptools>=68.0.0" \
+        "setuptools>=68.0.0,<81.0.0" \
         wheel \
         "librosa==0.11.0" \
         "soundfile>=0.12.0,<0.13.0" \
