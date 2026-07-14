@@ -28,6 +28,9 @@ import HfTokenConnect from '../components/HfTokenConnect';
 import { generateAvatar } from '../lib/gradioClient';
 import { getHfToken } from '../lib/hfToken';
 
+const SAMPLE_SCRIPT =
+  'Welcome to Avatar Renderer MCP. Pick a face, type your message, choose a voice, and generate a polished talking-avatar video on Hugging Face powered infrastructure.';
+
 const AVATARS = [
   {
     id: 'professional',
@@ -70,9 +73,7 @@ const AVATARS = [
 export default function Page() {
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [audioFile, setAudioFile] = useState<File | null>(null);
-  const [script, setScript] = useState(
-    "Hello! I'm your AI avatar, ready to bring your content to life with realistic expressions and natural voice synchronization."
-  );
+  const [script, setScript] = useState(SAMPLE_SCRIPT);
   const [selectedAvatar, setSelectedAvatar] = useState('professional');
   const [qualityMode, setQualityMode] = useState('auto');
   // Audio source: 'tts' = synthesize from the script text, 'upload' = use the file.
@@ -107,13 +108,19 @@ export default function Page() {
     return () => observer.disconnect();
   }, []);
 
+  const selectedAvatarConfig = AVATARS.find((avatar) => avatar.id === selectedAvatar) ?? AVATARS[0];
+
+  const loadSelectedAvatarFile = async (): Promise<File> => {
+    const response = await fetch(selectedAvatarConfig.img);
+    if (!response.ok) {
+      throw new Error(`Could not load selected avatar image: ${selectedAvatarConfig.name}`);
+    }
+    const blob = await response.blob();
+    return new File([blob], `${selectedAvatarConfig.id}.png`, { type: blob.type || 'image/png' });
+  };
+
   const handleGenerate = async () => {
     if (isGenerating) return;
-
-    if (!avatarFile) {
-      alert('Please upload an avatar image to generate');
-      return;
-    }
     const useText = audioSource === 'tts';
     if (useText && !script.trim()) {
       alert('Please type some text to speak (or switch to Upload audio).');
@@ -146,10 +153,12 @@ export default function Page() {
     }, 1200);
 
     try {
+      const imageForGeneration = avatarFile ?? await loadSelectedAvatarFile();
+
       // Inference runs entirely on the Hugging Face Space (no GPU on Vercel).
       // Pass the user's HF token (if connected) so the run uses THEIR ZeroGPU quota.
       const url = await generateAvatar({
-        image: avatarFile,
+        image: imageForGeneration,
         audio: useText ? null : audioFile,
         text: useText ? script.trim() : '',
         voice,
@@ -189,7 +198,7 @@ export default function Page() {
   };
 
   const handleSample = () => {
-    setScript('Hello! Welcome to Avatar Renderer MCP demo. Watch how quickly we generate a talking head video.');
+    setScript(SAMPLE_SCRIPT);
   };
 
   const scrollToSection = (id: string) => {
@@ -257,13 +266,13 @@ export default function Page() {
           <div className="fade-in mb-8">
             <h1 className="text-5xl md:text-7xl font-bold mb-6">
               <span className="bg-gradient-to-r from-cyan-400 via-blue-400 to-purple-400 bg-clip-text text-transparent">
-                Bring Avatars
+                Sell, Teach, and Support
                 <br />
-                to Life
+                with AI Avatars
               </span>
             </h1>
             <p className="text-xl md:text-2xl text-gray-300 max-w-3xl mx-auto mb-12">
-              Transform static images into dynamic, AI-powered avatars with realistic expressions and voice synchronization
+              Turn one image and one script into a polished talking-head video for product demos, training, support, and creator content. Run generation through Hugging Face powered GPU infrastructure—no GPU on Vercel required.
             </p>
           </div>
 
@@ -287,6 +296,20 @@ export default function Page() {
               <div className="absolute -top-4 -left-4 w-32 h-32 bg-cyan-500/10 rounded-full blur-3xl"></div>
               <div className="absolute -bottom-4 -right-4 w-32 h-32 bg-purple-500/10 rounded-full blur-3xl"></div>
             </div>
+          </div>
+
+          <div className="fade-in mb-8 grid grid-cols-1 md:grid-cols-3 gap-4 max-w-4xl mx-auto text-left">
+            {[
+              ['1', 'Pick a face', 'Use a sample avatar or upload your own image.'],
+              ['2', 'Type a pitch', 'Use text-to-speech or upload finished audio.'],
+              ['3', 'Render on HF', 'Send the job to a Hugging Face Space and download MP4.'],
+            ].map(([step, title, desc]) => (
+              <div key={step} className="neumorphic-dark rounded-2xl p-5 border border-cyan-500/20">
+                <div className="text-cyan-300 text-sm font-bold mb-2">Step {step}</div>
+                <div className="text-lg font-semibold mb-1">{title}</div>
+                <div className="text-sm text-gray-400">{desc}</div>
+              </div>
+            ))}
           </div>
 
           <div className="fade-in">
@@ -313,7 +336,7 @@ export default function Page() {
               </span>
             </h2>
             <p className="text-xl text-gray-300 max-w-3xl mx-auto">
-              Experience the power of our AI in three simple steps
+              Select a sample avatar or upload your own image, type a commercial script, and render through the Hugging Face backend.
             </p>
           </div>
 
@@ -333,7 +356,10 @@ export default function Page() {
               {AVATARS.map((avatar) => (
                 <div
                   key={avatar.id}
-                  onClick={() => setSelectedAvatar(avatar.id)}
+                  onClick={() => {
+                    setSelectedAvatar(avatar.id);
+                    setAvatarFile(null);
+                  }}
                   className={`neumorphic-dark rounded-xl p-3 cursor-pointer transition-all ${
                     selectedAvatar === avatar.id
                       ? 'ring-2 ring-cyan-500 shadow-[0_0_30px_rgba(0,150,255,0.5)]'
@@ -359,7 +385,7 @@ export default function Page() {
                   <div className="w-full border-t border-cyan-500/30"></div>
                 </div>
                 <div className="relative flex justify-center text-sm">
-                  <span className="px-4 bg-[#0a0a2a] text-gray-400">Or upload your own avatar image (PNG/JPG)</span>
+                  <span className="px-4 bg-[#0a0a2a] text-gray-400">Selected samples work immediately, or upload your own avatar image (PNG/JPG)</span>
                 </div>
               </div>
 
@@ -368,7 +394,7 @@ export default function Page() {
                   <div className="flex flex-col items-center justify-center pt-5 pb-6">
                     <UploadCloud className="w-8 h-8 text-cyan-400 mb-2 group-hover:scale-110 transition-transform" />
                     <p className="text-sm text-gray-300">
-                      {avatarFile ? avatarFile.name : 'Click to upload or drag and drop'}
+                      {avatarFile ? avatarFile.name : `Using sample: ${selectedAvatarConfig.name} (click to upload your own)`}
                     </p>
                     <p className="text-xs text-gray-500 mt-1">PNG, JPG up to 10MB</p>
                   </div>
@@ -608,11 +634,9 @@ export default function Page() {
                 Reset
               </button>
 
-              {!avatarFile || !audioFile ? (
-                <p className="mt-4 text-sm text-gray-400">
-                  Please select an avatar image and provide audio to generate
-                </p>
-              ) : null}
+              <p className="mt-4 text-sm text-gray-400">
+                Using {avatarFile ? 'your uploaded image' : `the ${selectedAvatarConfig.name} sample image`} with {audioSource === 'tts' ? 'text-to-speech' : audioFile ? audioFile.name : 'uploaded audio'}.
+              </p>
             </div>
           </div>
         </div>
@@ -720,7 +744,7 @@ export default function Page() {
               {
                 icon: Headphones,
                 title: 'Customer Support',
-                desc: '24/7 AI support agents with natural conversations',
+                desc: 'Human-style onboarding, FAQs, and product support videos at scale',
                 color: 'from-cyan-600 to-blue-600',
                 textColor: 'text-cyan-400',
               },
@@ -741,7 +765,7 @@ export default function Page() {
               {
                 icon: Megaphone,
                 title: 'Marketing',
-                desc: 'Brand ambassadors delivering consistent messaging',
+                desc: 'Reusable product spokespeople for ads, launches, and landing pages',
                 color: 'from-orange-600 to-red-600',
                 textColor: 'text-orange-400',
               },
@@ -777,9 +801,9 @@ export default function Page() {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-4xl mx-auto mb-20">
             {[
-              { icon: Zap, title: 'Real-time Processing', desc: 'Generate avatars in under 60 seconds', color: 'from-cyan-600 to-blue-600' },
-              { icon: Video, title: 'MP4 Output', desc: 'High-quality 1080p video export', color: 'from-green-600 to-emerald-600' },
-              { icon: Cpu, title: 'AI Models', desc: 'Advanced neural networks', color: 'from-purple-600 to-pink-600' },
+              { icon: Zap, title: 'Simple Workflow', desc: 'Pick image, write text, choose voice, render', color: 'from-cyan-600 to-blue-600' },
+              { icon: Video, title: 'Commercial MP4s', desc: 'Landing-page-ready videos for sales and education', color: 'from-green-600 to-emerald-600' },
+              { icon: Cpu, title: 'Hugging Face Backend', desc: 'Vercel UI connects to GPU/ZeroGPU Spaces for inference', color: 'from-purple-600 to-pink-600' },
             ].map((item, idx) => (
               <div key={idx} className="text-center p-6">
                 <div className={`w-12 h-12 bg-gradient-to-r ${item.color} rounded-lg flex items-center justify-center mx-auto mb-4`}>
@@ -798,7 +822,7 @@ export default function Page() {
               </span>
             </h2>
             <p className="text-xl text-gray-300 mb-12 max-w-2xl mx-auto">
-              Join thousands of creators bringing their ideas to life with AI avatars
+              Start with a sample face, connect Hugging Face for GPU-backed rendering, and publish avatar videos anywhere.
             </p>
             <button
               onClick={() => scrollToSection('demo')}

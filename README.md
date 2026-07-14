@@ -140,6 +140,8 @@ The first three work **immediately** with zero configuration.
 
 ## Get Started
 
+> **UI note:** Use `make launch` for the supported local interface. The legacy Tk desktop GUI is deprecated and kept only for low-level debugging.
+
 ### Option A: One-Command Install
 
 ```bash
@@ -153,13 +155,13 @@ PortAudio headers just to set up the renderer. If you want the optional local
 audio playback backend used by the TTS test GUI, install PortAudio first
 (`brew install portaudio`) and then install PyAudio in the virtual environment.
 
-### Option B: Desktop App
+### Option B: Modern Web Launcher
 
 ```bash
 make launch
 ```
 
-Opens a visual studio with text-to-speech, avatar selection, and one-click rendering.
+Opens the supported browser-based studio with text-to-speech, avatar selection, and one-click rendering. This is the only supported local UI. The old Tk desktop GUI is deprecated because it uses an outdated design and is unstable on WSL/X11.
 
 ### Option C: API Server
 

@@ -521,24 +521,26 @@ gui: install ## Start Backend (8000) + TTS (4123) + Desktop GUI
 	@PYTHONPATH=$(CURDIR)/$(EXT_DEPS_DIR):$(PYTHONPATH) \
         MODEL_ROOT=$(MODELS_DIR) \
         EXT_DEPS_DIR=$(CURDIR)/$(EXT_DEPS_DIR) \
-        $(VENV_BIN)/uvicorn app.api:app --host 0.0.0.0 --port 8000 > /tmp/avatar-backend.log 2>&1 & \
-        echo $$! > /tmp/avatar-backend.pid
-	
-	@printf "$(BLUE)Step 3: Waiting for services to be ready...$(RESET)\n"
-	@for i in {1..30}; do \
-        if curl -s http://localhost:8000/health/live > /dev/null 2>&1 && curl -s http://localhost:4123/health > /dev/null 2>&1; then \
-            printf "$(GREEN)✓ All services are ready!$(RESET)\n"; \
-            break; \
-        fi; \
-        printf "."; \
-        sleep 1; \
-        if [ $$i -eq 30 ]; then \
-            printf "\n$(RED)✗ Services failed to start within 30 seconds$(RESET)\n"; \
-            printf "$(YELLOW)Check backend logs: tail -f /tmp/avatar-backend.log$(RESET)\n"; \
-            printf "$(YELLOW)Check TTS logs: tail -f /tmp/avatar-tts.log$(RESET)\n"; \
-            kill $$(cat /tmp/avatar-backend.pid) 2>/dev/null || true; \
-            kill $$(cat /tmp/avatar-tts.pid) 2>/dev/null || true; \
-            rm -f /tmp/avatar-backend.pid /tmp/avatar-tts.pid; \
+        $(VENV_BIN)/python demo.py \
+        --image $(WEB_DEMO_IMAGE) \
+        --audio $(WEB_DEMO_AUDIO) \
+        --out $(WEB_DEMO_OUT) \
+        --quality $(WEB_DEMO_QUALITY) \
+        --wav2lip
+	@printf "$(BLUE)Updating poster image...$(RESET)\n"
+	@ffmpeg -y -ss 00:00:01 -i $(WEB_DEMO_OUT) -frames:v 1 -q:v 2 $(WEB_DEMO_POSTER) >/tmp/avatar-web-demo-poster.log 2>&1 || { \
+        printf "$(YELLOW)⚠ Could not generate poster; see /tmp/avatar-web-demo-poster.log$(RESET)\n"; \
+        true; \
+    }
+	@printf "$(GREEN)✓ Updated frontend hero video: $(WEB_DEMO_OUT)$(RESET)\n"
+	@printf "$(GREEN)✓ Updated frontend poster: $(WEB_DEMO_POSTER)$(RESET)\n"
+	@if [ "$(WEB_DEMO_DEPLOY)" = "1" ]; then \
+        if command -v vercel >/dev/null 2>&1; then \
+            printf "$(BLUE)Deploying frontend to Vercel...$(RESET)\n"; \
+            cd frontend && vercel --prod; \
+        else \
+            printf "$(YELLOW)⚠ WEB_DEMO_DEPLOY=1 requested but vercel CLI is not installed.$(RESET)\n"; \
+            printf "$(YELLOW)  Install with: npm i -g vercel$(RESET)\n"; \
             exit 1; \
         fi; \
     done
@@ -576,7 +578,13 @@ gui: install ## Start Backend (8000) + TTS (4123) + Desktop GUI
         kill $$(cat /tmp/avatar-tts.pid) 2>/dev/null || true; \
         rm -f /tmp/avatar-tts.pid; \
     fi
-	@printf "$(GREEN)$(BOLD)✓ Session complete$(RESET)\n"
+
+.PHONY: gui
+gui:
+	@printf "$(YELLOW)⚠ The legacy Tk desktop GUI is deprecated and no longer supported.$(RESET)\n"
+	@printf "$(BLUE)Use the modern web launcher instead:$(RESET) make launch\n"
+	@printf "$(YELLOW)If you really need the legacy module for debugging, run:$(RESET) $(VENV_BIN)/python -m gui\n"
+	@exit 1
 
 .PHONY: launch
 launch: install install-chromium-linux ## Start Backend (8000) + TTS (4123) + Web Launcher
