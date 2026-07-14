@@ -148,6 +148,11 @@ cd avatar-renderer-mcp
 make install
 ```
 
+`make install` no longer installs PyAudio by default, so macOS users do not need
+PortAudio headers just to set up the renderer. If you want the optional local
+audio playback backend used by the TTS test GUI, install PortAudio first
+(`brew install portaudio`) and then install PyAudio in the virtual environment.
+
 ### Option B: Desktop App
 
 ```bash

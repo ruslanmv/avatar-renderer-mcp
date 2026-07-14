@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import importlib
 import inspect
 import logging
 import os
 import re
 import threading
 import time
+import types
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
@@ -36,6 +38,7 @@ from pydantic import BaseModel, Field
 
 # IMPORTANT: Import the multilingual version
 try:
+    import chatterbox.mtl_tts as chatterbox_mtl_tts
     from chatterbox.mtl_tts import ChatterboxMultilingualTTS
 except ImportError:
     print("CRITICAL ERROR: Could not import 'chatterbox.mtl_tts'. Ensure your python path is correct.")
@@ -45,6 +48,36 @@ except ImportError:
 # Configuration
 # -----------------------------------------------------------------------------
 logger = logging.getLogger("vr_chatterbox_server_multilingual")
+
+
+class _NoOpWatermarker:
+    def apply_watermark(self, audio, *args, **kwargs):  # noqa: ANN001
+        return audio
+
+    def watermark(self, audio, *args, **kwargs):  # noqa: ANN001
+        return audio
+
+    def __call__(self, audio, *args, **kwargs):  # noqa: ANN001
+        return audio
+
+
+def _patch_perth_watermarker_module() -> None:
+    """Patch Chatterbox/Perth watermarking when the optional constructor is missing."""
+    perth_module = getattr(chatterbox_mtl_tts, "perth", None)
+    if perth_module is None and importlib.util.find_spec("perth") is not None:
+        perth_module = importlib.import_module("perth")
+
+    if perth_module is None:
+        perth_module = types.SimpleNamespace()
+
+    watermarker = getattr(perth_module, "PerthImplicitWatermarker", None)
+    if not callable(watermarker):
+        perth_module.PerthImplicitWatermarker = _NoOpWatermarker
+        chatterbox_mtl_tts.perth = perth_module
+        logger.warning("🩹 PerthImplicitWatermarker unavailable; using no-op watermarking.")
+
+
+_patch_perth_watermarker_module()
 
 SUPPORTED_LANGUAGES = {
     "ar": "Arabic", "da": "Danish", "de": "German", "el": "Greek", "en": "English",
@@ -262,6 +295,11 @@ class ChatterboxServiceMultilingual:
         self._generate_sig_params: Optional[set[str]] = None
 
     @staticmethod
+    def _patch_perth_watermarker() -> None:
+        """Ensure Chatterbox can construct a watermarker before model loading."""
+        _patch_perth_watermarker_module()
+
+    @staticmethod
     def _patch_alignment_stream_analyzer() -> None:
         """
         Prevent "one-word" outputs caused by AlignmentStreamAnalyzer forcing EOS when it detects repetition.
@@ -323,6 +361,7 @@ class ChatterboxServiceMultilingual:
             try:
                 # Patch BEFORE model instantiation
                 self._patch_alignment_stream_analyzer()
+                self._patch_perth_watermarker()
 
                 fp_kwargs = self._from_pretrained_kwargs()
                 if fp_kwargs.get("attn_implementation"):
