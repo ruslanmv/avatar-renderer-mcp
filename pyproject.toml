@@ -72,7 +72,6 @@ dependencies = [
     "ml-dtypes>=0.5.3",                               # exposes float4_e2m1fn, fixes your crash
     "chatterbox-tts>=0.1.4",                          # your TTS engine
     "requests>=2.32.0",                               # HTTP client for TTS client GUI
-    "pyaudio>=0.2.14",
     "simpleaudio>=1.0.4",                             # simple cross-platform audio playback
 
     "av>=16.0.1",

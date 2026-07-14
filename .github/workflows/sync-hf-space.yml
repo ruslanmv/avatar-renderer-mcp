@@ -48,6 +48,10 @@ jobs:
 
           # Enterprise static frontend
           cp -r hf/static "$DEPLOY_DIR/static"
+          # Hugging Face rejects binary files on plain Git pushes unless Xet is
+          # configured. Keep the poster image in the Space and omit the bundled
+          # MP4 preview from the deploy tree.
+          rm -f "$DEPLOY_DIR/static/demo.mp4"
 
           # Python backend
           cp -r app "$DEPLOY_DIR/app"
