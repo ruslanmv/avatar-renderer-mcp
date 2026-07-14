@@ -253,11 +253,17 @@ install-external-py: venv ## Install external python deps required by cloned rep
 	@# Audio processing
 	@printf "$(BLUE)→ Installing audio processing stack...$(RESET)\n"
 	@$(UV) pip install --python $(VENV_BIN)/python \
+        --reinstall-package setuptools \
         "setuptools>=68.0.0" \
+        wheel \
         "librosa==0.9.2" \
         "soundfile>=0.12.0,<0.13.0" \
         "numba>=0.58.0" \
         || { printf "$(RED)✗ Audio deps failed$(RESET)\n"; exit 1; }
+	@$(VENV_BIN)/python -c "import pkg_resources, librosa; print('  ✓ pkg_resources available via setuptools; librosa:', librosa.__version__)" || { \
+        printf "$(RED)✗ Audio import check failed (pkg_resources/librosa)$(RESET)\n"; \
+        exit 1; \
+    }
 
 	@# Video processing
 	@printf "$(BLUE)→ Installing video processing stack...$(RESET)\n"
